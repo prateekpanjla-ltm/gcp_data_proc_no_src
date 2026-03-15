@@ -1,0 +1,168 @@
+# Cloud Build CI: Deploy -> Test -> Verify -> Destroy
+#
+# Trigger: Push to 'test' branch
+# This config runs the full integration test pipeline.
+#
+# To create the trigger (for Cloud Source Repos or GitHub):
+#   gcloud builds triggers create cloud-source-repositories \
+#     --repo=gcp_data_processing \
+#     --branch-pattern="^test$" \
+#     --build-config=config/cloudbuild-ci-test.yaml \
+#     --substitutions=_ENVIRONMENT=test \
+#     --project=beaming-glyph-489707-b8
+#
+# For Gitea (manual trigger):
+#   gcloud builds submit . \
+#     --config=config/cloudbuild-ci-test.yaml \
+#     --substitutions=_ENVIRONMENT=test \
+#     --project=beaming-glyph-489707-b8
+
+timeout: '3600s'  # 1 hour max
+
+substitutions:
+  _ENVIRONMENT: 'test'
+  _REGION: 'us-central1'
+  _HOUR_OFFSET: '2'
+
+steps:
+  # Step 1: Install Terraform
+  - name: 'hashicorp/terraform:1.9'
+    id: 'check-terraform'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - 'terraform version'
+
+  # Step 2: Deploy all phases
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'deploy'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "=== Deploying all phases ==="
+        chmod +x infrastructure/scripts/deploy-all-phases.sh
+        export GOOGLE_APPLICATION_CREDENTIALS="/workspace/infrastructure/$_ENVIRONMENT-terraform-deployer-key.json"
+        infrastructure/scripts/deploy-all-phases.sh "$PROJECT_ID" "$_ENVIRONMENT" "$_REGION"
+    waitFor: ['check-terraform']
+
+  # Step 3: Trigger the download job
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'trigger-download'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        JOB_NAME="$_ENVIRONMENT-github-archive-download-gsutil"
+        echo "=== Triggering download job: $${JOB_NAME} ==="
+        gcloud run jobs execute "$${JOB_NAME}" \
+          --project="$PROJECT_ID" \
+          --region="$_REGION" \
+          --wait
+    waitFor: ['deploy']
+
+  # Step 4: Wait for landing file
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'verify-landing'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        LANDING_BUCKET="$PROJECT_ID-$_ENVIRONMENT-github-archive-landing"
+        TARGET_DATE=$$(date -u -d "$_HOUR_OFFSET hours ago" +"%Y-%m-%d")
+        TARGET_HOUR=$$(date -u -d "$_HOUR_OFFSET hours ago" +"%-H")
+        TARGET_FILE="$${TARGET_DATE}-$${TARGET_HOUR}.json.gz"
+
+        echo "=== Waiting for $${TARGET_FILE} in gs://$${LANDING_BUCKET}/ ==="
+        ELAPSED=0
+        while [ $$ELAPSED -lt 300 ]; do
+          if gcloud storage ls "gs://$${LANDING_BUCKET}/$${TARGET_FILE}" 2>/dev/null | grep -q "$${TARGET_FILE}"; then
+            echo "File found after $${ELAPSED}s"
+            exit 0
+          fi
+          sleep 15
+          ELAPSED=$$((ELAPSED + 15))
+          echo "  Waiting... ($${ELAPSED}s)"
+        done
+        echo "FAILED: File not found after 300s"
+        exit 1
+    waitFor: ['trigger-download']
+
+  # Step 5: Wait for staging (processing complete)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'verify-staging'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        STAGING_BUCKET="$PROJECT_ID-$_ENVIRONMENT-github-archive-staging"
+        TARGET_DATE=$$(date -u -d "$_HOUR_OFFSET hours ago" +"%Y-%m-%d")
+        TARGET_HOUR=$$(date -u -d "$_HOUR_OFFSET hours ago" +"%-H")
+        PREFIX="$${TARGET_DATE}-$${TARGET_HOUR}"
+
+        echo "=== Waiting for processed files in gs://$${STAGING_BUCKET}/ ==="
+        ELAPSED=0
+        while [ $$ELAPSED -lt 600 ]; do
+          COUNT=$$(gcloud storage ls "gs://$${STAGING_BUCKET}/**$${PREFIX}**" 2>/dev/null | wc -l)
+          if [ "$$COUNT" -gt 0 ]; then
+            echo "Processed files found ($$COUNT) after $${ELAPSED}s"
+            exit 0
+          fi
+          sleep 30
+          ELAPSED=$$((ELAPSED + 30))
+          echo "  Waiting... ($${ELAPSED}s)"
+        done
+        echo "FAILED: No processed files after 600s"
+        exit 1
+    waitFor: ['verify-landing']
+
+  # Step 6: Verify BigQuery load
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'verify-bigquery'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        TARGET_DATE=$$(date -u -d "$_HOUR_OFFSET hours ago" +"%Y-%m-%d")
+        TARGET_HOUR=$$(date -u -d "$_HOUR_OFFSET hours ago" +"%-H")
+
+        echo "=== Verifying BigQuery rows ==="
+        ELAPSED=0
+        while [ $$ELAPSED -lt 300 ]; do
+          ROW_COUNT=$$(bq query --nouse_legacy_sql --format=csv --quiet \
+            "SELECT COUNT(*) FROM \`$PROJECT_ID.github_archive.github_events\` WHERE DATE(created_at) = '$${TARGET_DATE}' AND EXTRACT(HOUR FROM created_at) = $${TARGET_HOUR}" \
+            2>/dev/null | tail -1)
+
+          if [ "$$ROW_COUNT" -gt 0 ] 2>/dev/null; then
+            echo "BigQuery rows: $$ROW_COUNT (after $${ELAPSED}s)"
+            echo ""
+            echo "=== Sample row ==="
+            bq query --nouse_legacy_sql --format=pretty --max_rows=1 \
+              "SELECT event_id, event_type, actor_login, repo_name, etl_create_id FROM \`$PROJECT_ID.github_archive.github_events\` WHERE DATE(created_at) = '$${TARGET_DATE}' AND EXTRACT(HOUR FROM created_at) = $${TARGET_HOUR} LIMIT 1"
+            exit 0
+          fi
+          sleep 30
+          ELAPSED=$$((ELAPSED + 30))
+          echo "  Waiting... ($${ELAPSED}s)"
+        done
+        echo "FAILED: No rows in BigQuery after 300s"
+        exit 1
+    waitFor: ['verify-staging']
+
+  # Step 7: Destroy all phases (always runs)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'destroy'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        echo "=== Destroying all infrastructure ==="
+        chmod +x infrastructure/scripts/destroy-all-phases.sh
+        export GOOGLE_APPLICATION_CREDENTIALS="/workspace/infrastructure/$_ENVIRONMENT-terraform-deployer-key.json"
+        infrastructure/scripts/destroy-all-phases.sh "$PROJECT_ID" "$_ENVIRONMENT" "$_REGION"
+    # Run destroy even if previous steps failed
+    allowFailure: true
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'

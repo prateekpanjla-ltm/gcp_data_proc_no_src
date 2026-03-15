@@ -1,0 +1,196 @@
+[
+  {
+    "name": "event_id",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Unique event identifier from GitHub Archive"
+  },
+  {
+    "name": "event_type",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Type of GitHub event (PushEvent, IssuesEvent, etc.)"
+  },
+  {
+    "name": "created_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "Event timestamp (ISO 8601 format)"
+  },
+  {
+    "name": "actor_id",
+    "type": "INTEGER",
+    "mode": "NULLABLE",
+    "description": "GitHub user ID of the actor"
+  },
+  {
+    "name": "actor_login",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Username of the actor"
+  },
+  {
+    "name": "actor_display_login",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Display name of the actor"
+  },
+  {
+    "name": "actor_gravatar_id",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Gravatar hash for actor avatar"
+  },
+  {
+    "name": "actor_url",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "GitHub API URL for the actor"
+  },
+  {
+    "name": "actor_avatar_url",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Avatar image URL"
+  },
+  {
+    "name": "actor_type",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Type of user account (if available)"
+  },
+  {
+    "name": "actor_site_admin",
+    "type": "BOOLEAN",
+    "mode": "NULLABLE",
+    "description": "Whether actor is a site admin"
+  },
+  {
+    "name": "repo_id",
+    "type": "INTEGER",
+    "mode": "NULLABLE",
+    "description": "GitHub repository ID"
+  },
+  {
+    "name": "repo_name",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Repository name (owner/repo)"
+  },
+  {
+    "name": "repo_url",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "GitHub API URL for the repository"
+  },
+  {
+    "name": "public",
+    "type": "BOOLEAN",
+    "mode": "NULLABLE",
+    "description": "Whether the event is public"
+  },
+  {
+    "name": "payload_ref",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Git reference (branch/tag) from payload"
+  },
+  {
+    "name": "payload_ref_type",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Reference type (branch, tag, etc.)"
+  },
+  {
+    "name": "payload_push_id",
+    "type": "INTEGER",
+    "mode": "NULLABLE",
+    "description": "Push event ID"
+  },
+  {
+    "name": "payload_size",
+    "type": "INTEGER",
+    "mode": "NULLABLE",
+    "description": "Number of commits in push"
+  },
+  {
+    "name": "payload_distinct_size",
+    "type": "INTEGER",
+    "mode": "NULLABLE",
+    "description": "Number of distinct commits"
+  },
+  {
+    "name": "payload_head",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "HEAD commit SHA"
+  },
+  {
+    "name": "payload_before",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Before commit SHA"
+  },
+  {
+    "name": "payload_issue_labels",
+    "type": "RECORD",
+    "mode": "REPEATED",
+    "description": "Issue labels as array of label objects",
+    "fields": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Label ID"
+      },
+      {
+        "name": "node_id",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Label node ID"
+      },
+      {
+        "name": "url",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Label URL"
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Label name"
+      },
+      {
+        "name": "color",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Label color hex code"
+      },
+      {
+        "name": "default",
+        "type": "BOOLEAN",
+        "mode": "NULLABLE",
+        "description": "Whether this is the default label"
+      },
+      {
+        "name": "description",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Label description"
+      }
+    ]
+  },
+  {
+    "name": "etl_create_ts",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "Timestamp when Phase 2 processor created this record"
+  },
+  {
+    "name": "etl_create_id",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "ETL processor identifier"
+  }
+]

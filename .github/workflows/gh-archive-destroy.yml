@@ -1,0 +1,100 @@
+name: Destroy GitHub Archive Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy (dev/test/prod)'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - dev
+          - prod
+      confirmation:
+        description: 'Type "destroy" to confirm'
+        required: true
+        type: string
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.confirmation == 'destroy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Confirm destruction
+        run: |
+          echo "## Destroying ${{ github.event.inputs.environment }} environment" >> $GITHUB_STEP_SUMMARY
+          echo "Project: $PROJECT_ID" >> $GITHUB_STEP_SUMMARY
+          echo "Triggered by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Decode GCP credentials
+        run: |
+          echo "${{ secrets.GCP_SA_KEY_BASE64 }}" | base64 -d > /tmp/gcp-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-key.json" >> $GITHUB_ENV
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5"
+          terraform_wrapper: false
+
+      - name: Activate service account
+        run: |
+          gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
+
+      - name: Destroy all phases
+        run: |
+          chmod +x infrastructure/scripts/destroy-all-phases.sh
+          ./infrastructure/scripts/destroy-all-phases.sh "$PROJECT_ID" "${{ github.event.inputs.environment }}" "$REGION"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
+
+      - name: Verify cleanup
+        if: always()
+        run: |
+          ENV="${{ github.event.inputs.environment }}"
+          echo "## Post-Destroy Verification" >> $GITHUB_STEP_SUMMARY
+          echo "Checking for remaining resources..." >> $GITHUB_STEP_SUMMARY
+
+          # Check Cloud Run
+          JOBS=$(gcloud run jobs list --project="$PROJECT_ID" --region="$REGION" --format="value(name)" --filter="name~${ENV}" 2>/dev/null | wc -l)
+          SERVICES=$(gcloud run services list --project="$PROJECT_ID" --region="$REGION" --format="value(name)" --filter="name~${ENV}" 2>/dev/null | wc -l)
+          FUNCTIONS=$(gcloud functions list --project="$PROJECT_ID" --format="value(name)" --filter="name~${ENV}" 2>/dev/null | wc -l)
+
+          echo "- Cloud Run Jobs: $JOBS" >> $GITHUB_STEP_SUMMARY
+          echo "- Cloud Run Services: $SERVICES" >> $GITHUB_STEP_SUMMARY
+          echo "- Cloud Functions: $FUNCTIONS" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$JOBS" -eq 0 ] && [ "$SERVICES" -eq 0 ] && [ "$FUNCTIONS" -eq 0 ]; then
+            echo "- **All resources destroyed successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **WARNING: Some resources may remain**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f /tmp/gcp-key.json
+
+  rejected:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirmation != 'destroy'
+    steps:
+      - name: Rejected
+        run: |
+          echo "Destruction cancelled — confirmation text did not match 'destroy'."
+          echo "## Destruction Cancelled" >> $GITHUB_STEP_SUMMARY
+          echo "You typed: '${{ github.event.inputs.confirmation }}' (expected: 'destroy')" >> $GITHUB_STEP_SUMMARY
+          exit 1

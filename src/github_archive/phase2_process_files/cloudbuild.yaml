@@ -1,0 +1,66 @@
+# Cloud Build configuration for GitHub Archive Phase 2 Processor
+# Uses Artifact Registry and deploys to Cloud Run
+#
+# Usage:
+#   gcloud builds submit --config=cloudbuild.yaml . \
+#     --substitutions=_REGION=us-central1,_ENVIRONMENT=dev
+#
+# Substitutions:
+#   _REGION: GCP region for deployment (default: us-central1)
+#   _ENVIRONMENT: Environment prefix for resource names (default: dev)
+
+substitutions:
+  _REGION: 'us-central1'
+  _ENVIRONMENT: 'dev'
+
+steps:
+  # Build the GitHub Archive processor image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-processor'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:latest'
+      - '-f'
+      - 'Dockerfile.processor'
+      - '.'
+
+  # Push images to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-images'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor'
+
+  # Deploy to Cloud Run
+  # Settings aligned with Terraform Layer 03 operational configuration
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'deploy-cloud-run'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy ${_ENVIRONMENT}-data-pipeline-processor \
+          --image ${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:${SHORT_SHA} \
+          --platform managed \
+          --region ${_REGION} \
+          --memory 4Gi \
+          --cpu 2 \
+          --timeout 3600 \
+          --max-instances 5 \
+          --concurrency 10 \
+          --no-allow-unauthenticated \
+          --service-account ${_ENVIRONMENT}-data-pipeline-processor@$PROJECT_ID.iam.gserviceaccount.com \
+          --set-env-vars PROJECT_ID=$PROJECT_ID,LANDING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-data-pipeline-landing,STAGING_BUCKET=$PROJECT_ID-${_ENVIRONMENT}-data-pipeline-staging
+
+# Image names for Artifact Registry
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:${SHORT_SHA}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/data-pipeline/processor:latest'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY

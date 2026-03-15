@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GitHub Archive Pipeline Dashboard</title>
+    <style>
+        body { font-family: monospace; margin: 2rem; background: #1a1a2e; color: #e0e0e0; }
+        h1 { color: #00d4ff; }
+        h2 { color: #7b68ee; margin-top: 2rem; }
+        a { color: #00d4ff; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { border: 1px solid #333; padding: 8px 12px; text-align: left; }
+        th { background: #16213e; color: #00d4ff; }
+        tr:nth-child(even) { background: #0f3460; }
+        .error { color: #ff6b6b; }
+        .warning { color: #ffd93d; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1.5rem; }
+        .arch { display: flex; align-items: center; gap: 0; margin: 1.5rem 0; flex-wrap: wrap; }
+        .arch-box { border: 2px solid #00d4ff; border-radius: 8px; padding: 10px 16px; text-align: center; background: #16213e; }
+        .arch-box .label { color: #00d4ff; font-size: 0.85em; }
+        .arch-box .name { color: #e0e0e0; font-size: 0.75em; margin-top: 4px; }
+        .arch-arrow { color: #7b68ee; font-size: 1.5em; padding: 0 8px; }
+        .arch-box.elt { border-color: #ffd93d; }
+        .arch-box.elt .label { color: #ffd93d; }
+    </style>
+</head>
+<body>
+    <h1>GitHub Archive Pipeline</h1>
+    <div class="nav">
+        <a href="/">Overview</a>
+        <a href="/phase1">Phase 1 Detail</a>
+        <a href="/phase2">Phase 2 Detail</a>
+        <a href="/phase3">Phase 3 Detail</a>
+        <a href="/elt">ELT Analytics</a>
+        <a href="/infra">Infrastructure</a>
+        <a href="/service-accounts">Service Accounts</a>
+    </div>
+
+    <div class="arch">
+        <div class="arch-box"><div class="label">Cloud Scheduler</div><div class="name">hourly trigger</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">Cloud Run Job</div><div class="name">download</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">GCS Landing</div><div class="name">*.json.gz</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">Cloud Run Service</div><div class="name">processor</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">GCS Staging</div><div class="name">*.ndjson.gz</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">Cloud Function</div><div class="name">bq-loader</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box"><div class="label">BigQuery</div><div class="name">github_events</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box elt"><div class="label">ELT</div><div class="name">views + MV + scheduled</div></div>
+    </div>
+
+    <h2>Daily Throughput</h2>
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>Files</th>
+            <th>Records In</th>
+            <th>Records Out</th>
+            <th>Errors</th>
+            <th>Error Rate %</th>
+            <th>Avg Duration (s)</th>
+        </tr>
+        {% for row in daily %}
+        <tr>
+            <td>{{ row.day }}</td>
+            <td>{{ row.files_processed }}</td>
+            <td>{{ row.total_records_in }}</td>
+            <td>{{ row.total_records_out }}</td>
+            <td class="{{ 'error' if row.total_errors > 0 else '' }}">{{ row.total_errors }}</td>
+            <td class="{{ 'error' if row.error_rate_pct and row.error_rate_pct > 5 else '' }}">{{ row.error_rate_pct or 0 }}%</td>
+            <td>{{ row.avg_duration_s }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Recent Errors</h2>
+    <table>
+        <tr>
+            <th>Timestamp (IST)</th>
+            <th>Phase</th>
+            <th>Severity</th>
+            <th>Message</th>
+        </tr>
+        {% for row in errors %}
+        <tr>
+            <td>{{ row.timestamp_ist }}</td>
+            <td>{{ row.phase }}</td>
+            <td class="{{ 'error' if row.severity == 'ERROR' else 'warning' }}">{{ row.severity }}</td>
+            <td>{{ row.error_message }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

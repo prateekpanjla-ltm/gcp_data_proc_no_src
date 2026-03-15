@@ -1,0 +1,43 @@
+# Cloud Build configuration for GitHub Archive Phase 2 Processor
+# Builds the processor Docker image and pushes to Artifact Registry
+# Cloud Run service is managed by Terraform (no deploy step here)
+#
+# Usage:
+#   gcloud builds submit src/github_archive/phase2_process_files \
+#     --config config/cloudbuild-phase2.yaml \
+#     --substitutions='_REGION=us-central1,_ENV=test'
+
+substitutions:
+  _REGION: 'us-central1'
+  _ENV: 'dev'
+
+steps:
+  # Build the GitHub Archive processor image (tag with BUILD_ID since SHORT_SHA is empty for gcloud builds submit)
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-processor'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ENV}-github-archive/processor:${BUILD_ID}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ENV}-github-archive/processor:latest'
+      - '-f'
+      - 'Dockerfile.processor'
+      - '.'
+
+  # Push images to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-images'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ENV}-github-archive/processor'
+
+# Image names for Artifact Registry
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ENV}-github-archive/processor:${BUILD_ID}'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_ENV}-github-archive/processor:latest'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY

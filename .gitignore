@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Environment variables
+.env
+.env.local
+
+# Google Cloud
+*.pem
+service-account.json
+secrets/
+
+# Data files
+*.json.gz
+*.json
+*.csv
+data/
+
+# But keep schema files and terraform lock files
+!**/schema.json
+!**/.terraform.lock.hcl
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude AI
+.claude/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!example.tfvars
+*.tfplan
+tfplan
+function-source.zip
+
+# Script logs
+logs/
+
+# Local test files
+local_test_files/
+tail
+
+# Terraform deployer service account keys
+*-terraform-deployer-key.json
+*-terraform-deployer-key.json.backup

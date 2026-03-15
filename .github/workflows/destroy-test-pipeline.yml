@@ -1,0 +1,51 @@
+name: Destroy Test Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "destroy" to confirm'
+        required: true
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  ENVIRONMENT: test
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event.inputs.confirm == 'destroy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.5"
+          terraform_wrapper: false
+
+      - name: Destroy all resources
+        run: |
+          chmod +x infrastructure/scripts/destroy-all-phases.sh
+          ./infrastructure/scripts/destroy-all-phases.sh "$PROJECT_ID" "$ENVIRONMENT" "$REGION"
+
+      - name: Verify clean state
+        run: |
+          echo "=== Remaining Cloud Run Jobs ==="
+          gcloud run jobs list --project="$PROJECT_ID" --region="$REGION" --format="value(name)" || true
+          echo "=== Remaining Cloud Run Services ==="
+          gcloud run services list --project="$PROJECT_ID" --region="$REGION" --format="value(name)" || true
+          echo "=== Remaining Scheduler Jobs ==="
+          gcloud scheduler jobs list --project="$PROJECT_ID" --location="$REGION" --format="value(name)" || true

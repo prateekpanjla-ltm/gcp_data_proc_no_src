@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Phase 1 Download Detail</title>
+    <style>
+        body { font-family: monospace; margin: 2rem; background: #1a1a2e; color: #e0e0e0; }
+        h1 { color: #00d4ff; }
+        a { color: #00d4ff; }
+        table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+        th, td { border: 1px solid #333; padding: 8px 12px; text-align: left; }
+        th { background: #16213e; color: #00d4ff; }
+        tr:nth-child(even) { background: #0f3460; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1.5rem; }
+        .arch { display: flex; align-items: center; gap: 0; margin: 1.5rem 0; flex-wrap: wrap; }
+        .arch-box { border: 2px solid #00d4ff; border-radius: 8px; padding: 10px 16px; text-align: center; background: #16213e; }
+        .arch-box.active { border-color: #6bcb77; box-shadow: 0 0 10px rgba(107,203,119,0.3); }
+        .arch-box .label { color: #00d4ff; font-size: 0.85em; }
+        .arch-box.active .label { color: #6bcb77; }
+        .arch-box .name { color: #e0e0e0; font-size: 0.75em; margin-top: 4px; }
+        .arch-arrow { color: #7b68ee; font-size: 1.5em; padding: 0 8px; }
+    </style>
+</head>
+<body>
+    <h1>Phase 1: Download Detail</h1>
+    <div class="nav">
+        <a href="/">Overview</a>
+        <a href="/phase1">Phase 1 Detail</a>
+        <a href="/phase2">Phase 2 Detail</a>
+        <a href="/phase3">Phase 3 Detail</a>
+        <a href="/elt">ELT Analytics</a>
+        <a href="/infra">Infrastructure</a>
+        <a href="/service-accounts">Service Accounts</a>
+    </div>
+
+    <div class="arch">
+        <div class="arch-box active"><div class="label">Cloud Scheduler</div><div class="name">hourly trigger</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box active"><div class="label">Cloud Run Job</div><div class="name">download.sh</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box active"><div class="label">GCS Landing</div><div class="name">*.json.gz</div></div>
+    </div>
+
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>File Name</th>
+            <th>Size (MB)</th>
+            <th>Size (bytes)</th>
+            <th>Timestamp (IST)</th>
+        </tr>
+        {% for row in downloads %}
+        <tr>
+            <td>{{ row.download_date }}</td>
+            <td>{{ row.file_name }}</td>
+            <td>{{ row.file_size_mb }}</td>
+            <td>{{ row.file_size_bytes }}</td>
+            <td>{{ row.timestamp_ist }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

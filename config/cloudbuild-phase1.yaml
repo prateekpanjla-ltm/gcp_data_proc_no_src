@@ -1,0 +1,26 @@
+# Cloud Build configuration for Phase 1 GitHub Archive Ingestion
+# Builds a custom image with download.sh script and coreutils
+
+steps:
+  # Build the GitHub Archive downloader image for Cloud Run Job
+  # Cloud Build automatically pushes images when they're listed in the 'images' section
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-gh-downloader'
+    args:
+      - 'build'
+      - '-t'
+      - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_ENV-github-archive/github-archive-downloader:latest'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+# Cloud Build will automatically push these images after successful build
+images:
+  - '$_REGION-docker.pkg.dev/$PROJECT_ID/$_ENV-github-archive/github-archive-downloader:latest'
+
+# Build timeout
+timeout: '1200s'
+
+# Specify logging behavior, required when using a custom service account.
+options:
+  logging: CLOUD_LOGGING_ONLY

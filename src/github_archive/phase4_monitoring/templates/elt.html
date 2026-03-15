@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ELT Analytics</title>
+    <style>
+        body { font-family: monospace; margin: 2rem; background: #1a1a2e; color: #e0e0e0; }
+        h1 { color: #00d4ff; }
+        h2 { color: #7b68ee; margin-top: 2rem; }
+        a { color: #00d4ff; }
+        table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; margin-bottom: 1.5rem; }
+        th, td { border: 1px solid #333; padding: 6px 12px; text-align: left; }
+        th { background: #16213e; color: #00d4ff; }
+        tr:nth-child(even) { background: #0f3460; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1.5rem; }
+        .bot { color: #ff6b6b; }
+        .human { color: #6bcb77; }
+        .arch { display: flex; align-items: center; gap: 0; margin: 1.5rem 0; flex-wrap: wrap; }
+        .arch-box { border: 2px solid #00d4ff; border-radius: 8px; padding: 10px 16px; text-align: center; background: #16213e; }
+        .arch-box.mv { border-color: #ffd93d; }
+        .arch-box.view { border-color: #6bcb77; }
+        .arch-box.sched { border-color: #ff6b6b; }
+        .arch-box .label { font-size: 0.85em; }
+        .arch-box.mv .label { color: #ffd93d; }
+        .arch-box.view .label { color: #6bcb77; }
+        .arch-box.sched .label { color: #ff6b6b; }
+        .arch-box .name { color: #e0e0e0; font-size: 0.75em; margin-top: 4px; }
+        .arch-arrow { color: #7b68ee; font-size: 1.5em; padding: 0 8px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; margin-left: 8px; }
+        .badge-mv { background: #ffd93d; color: #1a1a2e; }
+        .badge-view { background: #6bcb77; color: #1a1a2e; }
+        .badge-sched { background: #ff6b6b; color: #1a1a2e; }
+    </style>
+</head>
+<body>
+    <h1>ELT Analytics</h1>
+    <div class="nav">
+        <a href="/">Overview</a>
+        <a href="/phase1">Phase 1</a>
+        <a href="/phase2">Phase 2</a>
+        <a href="/phase3">Phase 3</a>
+        <a href="/elt">ELT Analytics</a>
+        <a href="/infra">Infrastructure</a>
+        <a href="/service-accounts">Service Accounts</a>
+    </div>
+
+    <div class="arch">
+        <div class="arch-box"><div class="label">github_events</div><div class="name">base table</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box view"><div class="label">stg_events</div><div class="name">deduplicated view</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box view"><div class="label">developer_activity</div><div class="name">mart view</div></div>
+        <div class="arch-arrow">&</div>
+        <div class="arch-box view"><div class="label">bot_vs_human</div><div class="name">mart view</div></div>
+    </div>
+    <div class="arch">
+        <div class="arch-box"><div class="label">github_events</div><div class="name">base table</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box mv"><div class="label">mv_repo_daily_stats</div><div class="name">materialized view</div></div>
+    </div>
+    <div class="arch">
+        <div class="arch-box"><div class="label">github_events</div><div class="name">base table</div></div>
+        <div class="arch-arrow">&#x2192;</div>
+        <div class="arch-box sched"><div class="label">hourly_activity_summary</div><div class="name">scheduled query (hourly)</div></div>
+    </div>
+
+    <h2>Bot vs Human Activity <span class="badge badge-view">Dataform View</span></h2>
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Events</th>
+            <th>Unique Actors</th>
+            <th>Unique Repos</th>
+            <th>Pushes</th>
+            <th>PRs</th>
+        </tr>
+        {% for row in bot_human %}
+        <tr>
+            <td>{{ row.day }}</td>
+            <td class="{{ 'bot' if row.actor_type == 'bot' else 'human' }}">{{ row.actor_type }}</td>
+            <td>{{ row.event_count }}</td>
+            <td>{{ row.unique_actors }}</td>
+            <td>{{ row.unique_repos }}</td>
+            <td>{{ row.pushes }}</td>
+            <td>{{ row.prs }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Top Repositories <span class="badge badge-mv">Materialized View</span></h2>
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>Repository</th>
+            <th>Events</th>
+            <th>Pushes</th>
+            <th>Issues</th>
+            <th>PRs</th>
+            <th>Stars</th>
+            <th>Forks</th>
+            <th>Contributors</th>
+        </tr>
+        {% for row in repos %}
+        <tr>
+            <td>{{ row.day }}</td>
+            <td>{{ row.repo_name }}</td>
+            <td>{{ row.total_events }}</td>
+            <td>{{ row.pushes }}</td>
+            <td>{{ row.issues }}</td>
+            <td>{{ row.pull_requests }}</td>
+            <td>{{ row.stars }}</td>
+            <td>{{ row.forks }}</td>
+            <td>{{ row.unique_contributors }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Top Developers <span class="badge badge-view">Dataform View</span></h2>
+    <table>
+        <tr>
+            <th>Date</th>
+            <th>Developer</th>
+            <th>Events</th>
+            <th>Pushes</th>
+            <th>Issues</th>
+            <th>PRs</th>
+            <th>Comments</th>
+            <th>Commits</th>
+            <th>Repos</th>
+            <th>Active (min)</th>
+        </tr>
+        {% for row in developers %}
+        <tr>
+            <td>{{ row.day }}</td>
+            <td>{{ row.actor_login }}</td>
+            <td>{{ row.total_events }}</td>
+            <td>{{ row.pushes }}</td>
+            <td>{{ row.issues_opened }}</td>
+            <td>{{ row.prs_opened }}</td>
+            <td>{{ row.comments }}</td>
+            <td>{{ row.distinct_commits }}</td>
+            <td>{{ row.repos_touched }}</td>
+            <td>{{ row.active_minutes }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

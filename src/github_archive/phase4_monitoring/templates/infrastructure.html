@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Terraform Infrastructure</title>
+    <style>
+        body { font-family: monospace; margin: 2rem; background: #1a1a2e; color: #e0e0e0; }
+        h1 { color: #00d4ff; }
+        h2 { color: #7b68ee; margin-top: 2rem; }
+        h3 { color: #6bcb77; margin-top: 1.5rem; }
+        a { color: #00d4ff; }
+        table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; margin-bottom: 1.5rem; }
+        th, td { border: 1px solid #333; padding: 6px 12px; text-align: left; }
+        th { background: #16213e; color: #00d4ff; }
+        tr:nth-child(even) { background: #0f3460; }
+        .nav { margin-bottom: 2rem; }
+        .nav a { margin-right: 1.5rem; }
+        .layer { color: #ffd93d; font-size: 0.85em; }
+        .dep { color: #ff6b6b; }
+
+        /* Dependency graph styles */
+        .graph { margin: 1.5rem 0; }
+        .graph-row { display: flex; align-items: stretch; justify-content: center; gap: 16px; margin: 0; }
+        .graph-connector { display: flex; justify-content: center; margin: 0; }
+        .graph-vline { width: 2px; height: 24px; background: #7b68ee; }
+        .graph-hlines { display: flex; align-items: flex-start; justify-content: center; position: relative; height: 24px; }
+        .graph-hlines .hbar { position: absolute; top: 0; height: 2px; background: #7b68ee; }
+        .graph-hlines .vdrop { position: absolute; top: 0; width: 2px; height: 24px; background: #7b68ee; }
+
+        .gbox { border: 2px solid #00d4ff; border-radius: 8px; padding: 10px 14px; text-align: center; background: #16213e; min-width: 130px; }
+        .gbox.p1 { border-color: #00d4ff; }
+        .gbox.p2 { border-color: #6bcb77; }
+        .gbox.p3 { border-color: #ffd93d; }
+        .gbox.p4 { border-color: #ff6b6b; }
+        .gbox.shared { border-color: #ffd93d; border-style: dashed; }
+        .gbox .gtitle { font-size: 0.85em; font-weight: bold; }
+        .gbox.p1 .gtitle { color: #00d4ff; }
+        .gbox.p2 .gtitle { color: #6bcb77; }
+        .gbox.p3 .gtitle { color: #ffd93d; }
+        .gbox.p4 .gtitle { color: #ff6b6b; }
+        .gbox.shared .gtitle { color: #ffd93d; }
+        .gbox .gsub { font-size: 0.7em; color: #999; margin-top: 3px; }
+        .gbox .gphase { font-size: 0.65em; color: #666; margin-top: 2px; }
+
+        .graph-arrow-down { text-align: center; color: #7b68ee; font-size: 1.2em; line-height: 1; margin: 4px 0; }
+        .graph-label { text-align: center; color: #999; font-size: 0.75em; margin: 2px 0; }
+
+        .dep-flow { display: flex; flex-direction: column; align-items: center; gap: 0; margin: 1.5rem auto; max-width: 800px; }
+        .dep-row { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; }
+        .dep-arrow { color: #7b68ee; font-size: 1.3em; }
+        .dep-branch { display: flex; flex-direction: column; align-items: center; }
+        .dep-outputs { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+
+        /* Terraform layer diagrams */
+        .tf-layers { display: flex; gap: 24px; align-items: flex-start; justify-content: center; margin: 1.5rem 0; flex-wrap: wrap; }
+        .tf-phase { border: 2px solid #333; border-radius: 12px; padding: 16px; min-width: 180px; position: relative; }
+        .tf-phase.p1 { border-color: #00d4ff; }
+        .tf-phase.p2 { border-color: #6bcb77; }
+        .tf-phase.p3 { border-color: #ffd93d; }
+        .tf-phase.p4 { border-color: #ff6b6b; }
+        .tf-phase-label { position: absolute; top: -10px; left: 16px; background: #1a1a2e; padding: 0 8px; font-size: 0.8em; font-weight: bold; }
+        .tf-phase.p1 .tf-phase-label { color: #00d4ff; }
+        .tf-phase.p2 .tf-phase-label { color: #6bcb77; }
+        .tf-phase.p3 .tf-phase-label { color: #ffd93d; }
+        .tf-phase.p4 .tf-phase-label { color: #ff6b6b; }
+        .tf-layer { border: 1px solid #444; border-radius: 6px; padding: 8px 10px; margin: 6px 0; background: #0f3460; }
+        .tf-layer .tf-lname { font-size: 0.8em; font-weight: bold; color: #e0e0e0; }
+        .tf-layer .tf-lres { font-size: 0.65em; color: #999; margin-top: 3px; }
+        .tf-layer-arrow { text-align: center; color: #7b68ee; font-size: 0.9em; margin: 2px 0; }
+
+        /* Resource dependency graph */
+        .res-graph { margin: 1.5rem auto; max-width: 900px; }
+        .res-phase { border: 2px solid #333; border-radius: 12px; padding: 16px; margin: 16px 0; position: relative; }
+        .res-phase.p1 { border-color: #00d4ff; }
+        .res-phase.p2 { border-color: #6bcb77; }
+        .res-phase.p3 { border-color: #ffd93d; }
+        .res-phase.p4 { border-color: #ff6b6b; }
+        .res-phase-label { position: absolute; top: -10px; left: 16px; background: #1a1a2e; padding: 0 8px; font-size: 0.8em; font-weight: bold; }
+        .res-phase.p1 .res-phase-label { color: #00d4ff; }
+        .res-phase.p2 .res-phase-label { color: #6bcb77; }
+        .res-phase.p3 .res-phase-label { color: #ffd93d; }
+        .res-phase.p4 .res-phase-label { color: #ff6b6b; }
+        .res-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
+        .res-box { border: 1px solid #555; border-radius: 6px; padding: 6px 10px; background: #0f3460; text-align: center; font-size: 0.75em; min-width: 100px; }
+        .res-box.sa { border-color: #ffd93d; }
+        .res-box.bucket { border-color: #6bcb77; }
+        .res-box.compute { border-color: #00d4ff; }
+        .res-box.iam { border-color: #ff6b6b; }
+        .res-box.build { border-color: #7b68ee; border-style: dashed; }
+        .res-arr { color: #7b68ee; font-size: 1em; }
+
+        /* State flow */
+        .state-flow { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 1rem 0; flex-wrap: wrap; }
+        .state-box { border: 2px solid #7b68ee; border-radius: 8px; padding: 8px 14px; text-align: center; background: #16213e; }
+        .state-box .st-name { font-size: 0.8em; color: #e0e0e0; font-weight: bold; }
+        .state-box .st-file { font-size: 0.65em; color: #7b68ee; margin-top: 3px; }
+        .state-box .st-count { font-size: 0.7em; color: #999; margin-top: 2px; }
+        .state-arr { color: #ffd93d; font-size: 1.2em; }
+        .state-note { font-size: 0.75em; color: #999; text-align: center; margin: 4px 0; }
+    </style>
+</head>
+<body>
+    <h1>Terraform Infrastructure</h1>
+    <div class="nav">
+        <a href="/">Overview</a>
+        <a href="/phase1">Phase 1</a>
+        <a href="/phase2">Phase 2</a>
+        <a href="/phase3">Phase 3</a>
+        <a href="/elt">ELT Analytics</a>
+        <a href="/infra">Infrastructure</a>
+        <a href="/service-accounts">Service Accounts</a>
+    </div>
+
+    <h2>Phase 1: Ingestion <span class="layer">(single layer)</span></h2>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_artifact_registry_repository</td><td>data_pipeline_repo</td><td>Docker repo for all phase images</td></tr>
+        <tr><td>google_cloud_run_v2_job</td><td>github_archive_downloader</td><td>Downloads hourly .json.gz files</td></tr>
+        <tr><td>google_cloud_scheduler_job</td><td>github_archive_download</td><td>Hourly trigger at :30</td></tr>
+        <tr><td>google_storage_bucket</td><td>github_archive_landing</td><td>Landing zone for raw files</td></tr>
+        <tr><td>google_service_account</td><td>github_archive_downloader</td><td>Cloud Run Job runtime SA</td></tr>
+        <tr><td>google_service_account</td><td>scheduler</td><td>Cloud Scheduler SA</td></tr>
+        <tr><td>google_service_account</td><td>cloudbuild_sa</td><td>Shared Cloud Build SA (all phases)</td></tr>
+        <tr><td>null_resource</td><td>wait_for_iam_propagation</td><td>Polls testIamPermissions before build</td></tr>
+        <tr><td>null_resource</td><td>build_downloader_image</td><td>Builds downloader Docker image</td></tr>
+    </table>
+
+    <h2>Phase 2: Process Files <span class="layer">(3 layers)</span></h2>
+
+    <h3>Layer 01: Static</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_service_account</td><td>processor</td><td>Cloud Run processor runtime SA</td></tr>
+        <tr><td>google_service_account</td><td>splitter</td><td>File splitter SA</td></tr>
+        <tr><td>google_service_account</td><td>eventarc_invoker</td><td>Eventarc trigger SA</td></tr>
+        <tr><td>google_storage_bucket</td><td>staging</td><td>Staging bucket for processed files</td></tr>
+    </table>
+
+    <h3>Layer 02: First-time</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_project_service</td><td>eventarc, pubsub, run, storage</td><td>Enable APIs</td></tr>
+        <tr><td>google_project_iam_member</td><td>multiple</td><td>Service agent IAM bindings</td></tr>
+        <tr><td>google_storage_bucket_iam_member</td><td>multiple</td><td>Bucket-level IAM for processor/splitter</td></tr>
+        <tr><td>google_cloudbuild_trigger</td><td>phase2_processor</td><td>Cloud Build trigger for processor</td></tr>
+        <tr><td>null_resource</td><td>init_service_agents</td><td>Initialize GCP service agents</td></tr>
+    </table>
+
+    <h3>Layer 03: Operational</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_cloud_run_v2_service</td><td>processor</td><td>File processor Cloud Run service</td></tr>
+        <tr><td>google_eventarc_trigger</td><td>main_file_processor</td><td>Triggers on landing bucket events</td></tr>
+        <tr><td>null_resource</td><td>build_processor_image</td><td>Builds processor Docker image</td></tr>
+        <tr><td>null_resource</td><td>update_trigger_ack_deadline</td><td>Sets Pub/Sub ack deadline to 600s</td></tr>
+    </table>
+
+    <h2>Phase 3: BigQuery Loader <span class="layer">(3 layers)</span></h2>
+
+    <h3>Layer 01: Static</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_bigquery_dataset</td><td>github_archive</td><td>Main events dataset</td></tr>
+        <tr><td>google_bigquery_table</td><td>github_events</td><td>Partitioned + clustered events table</td></tr>
+        <tr><td>google_service_account</td><td>bq_loader</td><td>Cloud Function runtime SA</td></tr>
+        <tr><td>google_service_account</td><td>eventarc_invoker</td><td>Eventarc trigger SA (BQ)</td></tr>
+    </table>
+
+    <h3>Layer 02: First-time</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_project_service</td><td>bigquery, cloudfunctions</td><td>Enable APIs</td></tr>
+        <tr><td>google_project_iam_member</td><td>multiple</td><td>BQ loader + service agent IAM</td></tr>
+        <tr><td>google_storage_bucket_iam_member</td><td>multiple</td><td>Staging bucket access for BQ loader</td></tr>
+    </table>
+
+    <h3>Layer 03: Operational</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_cloudfunctions2_function</td><td>bq_loader</td><td>Loads NDJSON from staging to BigQuery</td></tr>
+        <tr><td>google_storage_bucket</td><td>source</td><td>Function source code bucket</td></tr>
+    </table>
+
+    <h2>Phase 4: Monitoring Dashboard <span class="layer">(3 layers)</span></h2>
+
+    <h3>Layer 01: Static</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_bigquery_dataset</td><td>pipeline_logs</td><td>Log sink export dataset (90-day TTL)</td></tr>
+        <tr><td>google_service_account</td><td>dashboard</td><td>Dashboard Cloud Run SA</td></tr>
+    </table>
+
+    <h3>Layer 02: First-time</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_project_iam_member</td><td>dashboard_bq_job_user</td><td>BQ query access</td></tr>
+        <tr><td>google_project_iam_member</td><td>dashboard_bq_resource_viewer</td><td>INFORMATION_SCHEMA access</td></tr>
+        <tr><td>google_bigquery_dataset_iam_member</td><td>dashboard_data_viewer</td><td>Read pipeline_logs dataset</td></tr>
+        <tr><td>google_bigquery_dataset_iam_member</td><td>dashboard_github_archive_viewer</td><td>Read github_archive dataset</td></tr>
+        <tr><td>null_resource</td><td>cleanup_stale_sa_bindings</td><td>Remove deleted SA entries from IAM</td></tr>
+        <tr><td>null_resource</td><td>verify_dashboard_iam</td><td>Verify IAM propagation</td></tr>
+    </table>
+
+    <h3>Layer 03: Operational</h3>
+    <table>
+        <tr><th>Resource Type</th><th>Name</th><th>Purpose</th></tr>
+        <tr><td>google_logging_project_sink</td><td>pipeline_logs</td><td>Exports pipeline logs to BQ</td></tr>
+        <tr><td>google_cloud_run_v2_service</td><td>dashboard</td><td>Flask monitoring dashboard</td></tr>
+        <tr><td>null_resource</td><td>build_dashboard_image</td><td>Builds dashboard Docker image</td></tr>
+    </table>
+
+    <!-- ================================================================= -->
+    <!-- DIAGRAM 1: Layer Dependencies Within Each Phase                   -->
+    <!-- ================================================================= -->
+    <h2>1. Layer Dependencies</h2>
+    <p style="color:#999; font-size:0.85em;">Each phase deploys layers in order. Later layers depend on outputs from earlier layers.</p>
+
+    <div class="tf-layers">
+        <div class="tf-phase p1">
+            <div class="tf-phase-label">Phase 1</div>
+            <div class="tf-layer">
+                <div class="tf-lname">Single Layer</div>
+                <div class="tf-lres">SAs, AR repo, bucket, scheduler, Cloud Run Job, Cloud Build</div>
+            </div>
+        </div>
+
+        <div class="tf-phase p2">
+            <div class="tf-phase-label">Phase 2</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L01: Static</div>
+                <div class="tf-lres">SAs, staging bucket</div>
+            </div>
+            <div class="tf-layer-arrow">&#x25BC;</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L02: First-time</div>
+                <div class="tf-lres">APIs, IAM, service agents, CB trigger</div>
+            </div>
+            <div class="tf-layer-arrow">&#x25BC;</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L03: Operational</div>
+                <div class="tf-lres">Cloud Build, Cloud Run, Eventarc</div>
+            </div>
+        </div>
+
+        <div class="tf-phase p3">
+            <div class="tf-phase-label">Phase 3</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L01: Static</div>
+                <div class="tf-lres">SAs, BQ dataset + table</div>
+            </div>
+            <div class="tf-layer-arrow">&#x25BC;</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L02: First-time</div>
+                <div class="tf-lres">APIs, IAM, bucket access</div>
+            </div>
+            <div class="tf-layer-arrow">&#x25BC;</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L03: Operational</div>
+                <div class="tf-lres">Cloud Function, source bucket</div>
+            </div>
+        </div>
+
+        <div class="tf-phase p4">
+            <div class="tf-phase-label">Phase 4</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L01: Static</div>
+                <div class="tf-lres">Dashboard SA, pipeline_logs dataset</div>
+            </div>
+            <div class="tf-layer-arrow">&#x25BC;</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L02: First-time</div>
+                <div class="tf-lres">IAM grants, stale SA cleanup, verify</div>
+            </div>
+            <div class="tf-layer-arrow">&#x25BC;</div>
+            <div class="tf-layer">
+                <div class="tf-lname">L03: Operational</div>
+                <div class="tf-lres">Cloud Build, Cloud Run, log sink</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- DIAGRAM 2: Resource Dependency Graph (depends_on within phase)    -->
+    <!-- ================================================================= -->
+    <h2>2. Resource Dependency Graph</h2>
+    <p style="color:#999; font-size:0.85em;">Key <code>depends_on</code> relationships within each phase. Arrows show "must exist before".</p>
+
+    <div class="res-graph">
+        <div class="res-phase p1">
+            <div class="res-phase-label">Phase 1: Internal Dependencies</div>
+            <div class="res-row">
+                <div class="res-box sa">cloudbuild_sa</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">IAM roles</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box build">wait_for_iam</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box build">build_image</div>
+            </div>
+            <div class="res-row">
+                <div class="res-box bucket">AR repo</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box build">build_image</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Cloud Run Job</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Scheduler</div>
+            </div>
+        </div>
+
+        <div class="res-phase p2">
+            <div class="res-phase-label">Phase 2: Internal Dependencies</div>
+            <div class="res-row">
+                <div class="res-box sa">processor SA</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">bucket IAM</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box build">build_image</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Cloud Run Service</div>
+            </div>
+            <div class="res-row">
+                <div class="res-box sa">eventarc_invoker</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">run.invoker</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Eventarc Trigger</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box build">update_ack_deadline</div>
+            </div>
+        </div>
+
+        <div class="res-phase p3">
+            <div class="res-phase-label">Phase 3: Internal Dependencies</div>
+            <div class="res-row">
+                <div class="res-box sa">bq_loader SA</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">BQ + storage IAM</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Cloud Function</div>
+            </div>
+            <div class="res-row">
+                <div class="res-box bucket">BQ dataset</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box bucket">BQ table</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Cloud Function</div>
+            </div>
+        </div>
+
+        <div class="res-phase p4">
+            <div class="res-phase-label">Phase 4: Internal Dependencies</div>
+            <div class="res-row">
+                <div class="res-box build">cleanup_stale_sa</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">dataset IAM</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box build">verify_iam</div>
+            </div>
+            <div class="res-row">
+                <div class="res-box build">build_dashboard</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box compute">Cloud Run Service</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">public access (allUsers)</div>
+            </div>
+            <div class="res-row">
+                <div class="res-box bucket">log sink</div>
+                <div class="res-arr">&#x2192;</div>
+                <div class="res-box iam">sink writer IAM</div>
+            </div>
+        </div>
+    </div>
+
+    <p style="color:#999; font-size:0.75em; text-align:center;">
+        Legend: <span style="color:#ffd93d;">&#x25A0;</span> Service Account &nbsp;
+        <span style="color:#6bcb77;">&#x25A0;</span> Storage/Data &nbsp;
+        <span style="color:#00d4ff;">&#x25A0;</span> Compute &nbsp;
+        <span style="color:#ff6b6b;">&#x25A0;</span> IAM &nbsp;
+        <span style="color:#7b68ee;">&#x25A1;</span> null_resource
+    </p>
+
+    <!-- ================================================================= -->
+    <!-- DIAGRAM 3: Terraform State Flow                                   -->
+    <!-- ================================================================= -->
+    <h2>3. Terraform State Files</h2>
+    <p style="color:#999; font-size:0.85em;">Each layer has its own independent state file. No remote state sharing — values passed via <code>-var</code> flags.</p>
+
+    <h3>Phase 1</h3>
+    <div class="state-flow">
+        <div class="state-box">
+            <div class="st-name">terraform.tfstate</div>
+            <div class="st-file">phase1_ingestion/terraform/</div>
+            <div class="st-count">~15 resources</div>
+        </div>
+    </div>
+    <div class="state-note">outputs: landing_bucket, cloud_build_sa &#x2192; passed as -var to Phase 2</div>
+
+    <h3>Phase 2</h3>
+    <div class="state-flow">
+        <div class="state-box">
+            <div class="st-name">L01 state</div>
+            <div class="st-file">layers/01_static/</div>
+            <div class="st-count">~4 resources</div>
+        </div>
+        <div class="state-arr">&#x2192;</div>
+        <div class="state-box">
+            <div class="st-name">L02 state</div>
+            <div class="st-file">layers/02_first_time/</div>
+            <div class="st-count">~15 resources</div>
+        </div>
+        <div class="state-arr">&#x2192;</div>
+        <div class="state-box">
+            <div class="st-name">L03 state</div>
+            <div class="st-file">layers/03_operational/</div>
+            <div class="st-count">~8 resources</div>
+        </div>
+    </div>
+    <div class="state-note">outputs: staging_bucket, processor_url &#x2192; passed as -var to Phase 3</div>
+
+    <h3>Phase 3</h3>
+    <div class="state-flow">
+        <div class="state-box">
+            <div class="st-name">L01 state</div>
+            <div class="st-file">layers/01_static/</div>
+            <div class="st-count">~6 resources</div>
+        </div>
+        <div class="state-arr">&#x2192;</div>
+        <div class="state-box">
+            <div class="st-name">L02 state</div>
+            <div class="st-file">layers/02_first_time/</div>
+            <div class="st-count">~10 resources</div>
+        </div>
+        <div class="state-arr">&#x2192;</div>
+        <div class="state-box">
+            <div class="st-name">L03 state</div>
+            <div class="st-file">layers/03_operational/</div>
+            <div class="st-count">~5 resources</div>
+        </div>
+    </div>
+    <div class="state-note">outputs: bq_dataset &#x2192; passed as -var to Phase 4</div>
+
+    <h3>Phase 4</h3>
+    <div class="state-flow">
+        <div class="state-box">
+            <div class="st-name">L01 state</div>
+            <div class="st-file">layers/01_static/</div>
+            <div class="st-count">2 resources</div>
+        </div>
+        <div class="state-arr">&#x2192;</div>
+        <div class="state-box">
+            <div class="st-name">L02 state</div>
+            <div class="st-file">layers/02_first_time/</div>
+            <div class="st-count">~6 resources</div>
+        </div>
+        <div class="state-arr">&#x2192;</div>
+        <div class="state-box">
+            <div class="st-name">L03 state</div>
+            <div class="st-file">layers/03_operational/</div>
+            <div class="st-count">~6 resources</div>
+        </div>
+    </div>
+    <div class="state-note">All state files are local (terraform.tfstate). No remote backend configured.</div>
+
+    <!-- ================================================================= -->
+    <!-- Cross-Phase Dependencies                                          -->
+    <!-- ================================================================= -->
+    <h2>Cross-Phase Resource Dependencies</h2>
+
+    <!-- Data flow dependency -->
+    <h3>Data Flow</h3>
+    <div class="dep-flow">
+        <div class="gbox p1"><div class="gtitle">GCS Landing Bucket</div><div class="gsub">*.json.gz</div><div class="gphase">Created: Phase 1</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="graph-label">Eventarc trigger</div>
+        <div class="gbox p2"><div class="gtitle">Cloud Run Processor</div><div class="gsub">flatten + chunk</div><div class="gphase">Created: Phase 2</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="gbox p2"><div class="gtitle">GCS Staging Bucket</div><div class="gsub">*.ndjson.gz</div><div class="gphase">Created: Phase 2</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="graph-label">Eventarc trigger</div>
+        <div class="gbox p3"><div class="gtitle">Cloud Function BQ Loader</div><div class="gsub">load to BigQuery</div><div class="gphase">Created: Phase 3</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="gbox p3"><div class="gtitle">BigQuery: github_events</div><div class="gsub">partitioned + clustered</div><div class="gphase">Created: Phase 3</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="graph-label">INFORMATION_SCHEMA query</div>
+        <div class="gbox p4"><div class="gtitle">Dashboard</div><div class="gsub">reads row counts + job metadata</div><div class="gphase">Created: Phase 4</div></div>
+    </div>
+
+    <!-- Shared resources dependency -->
+    <h3>Shared Resources</h3>
+    <div class="dep-flow">
+        <div class="gbox shared"><div class="gtitle">Cloud Build SA</div><div class="gsub">{env}-cloud-build</div><div class="gphase">Created: Phase 1</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="graph-label">used by</div>
+        <div class="dep-outputs">
+            <div class="gbox p1"><div class="gtitle">P1: Downloader</div><div class="gsub">build image</div></div>
+            <div class="gbox p2"><div class="gtitle">P2: Processor</div><div class="gsub">build image</div></div>
+            <div class="gbox p3"><div class="gtitle">P3: BQ Loader</div><div class="gsub">build function</div></div>
+            <div class="gbox p4"><div class="gtitle">P4: Dashboard</div><div class="gsub">build image</div></div>
+        </div>
+    </div>
+
+    <div class="dep-flow" style="margin-top: 2rem;">
+        <div class="gbox shared"><div class="gtitle">Artifact Registry</div><div class="gsub">{env}-github-archive</div><div class="gphase">Created: Phase 1</div></div>
+        <div class="graph-arrow-down">&#x25BC;</div>
+        <div class="graph-label">stores images for</div>
+        <div class="dep-outputs">
+            <div class="gbox p1"><div class="gtitle">P1: Downloader</div></div>
+            <div class="gbox p2"><div class="gtitle">P2: Processor</div></div>
+            <div class="gbox p4"><div class="gtitle">P4: Dashboard</div></div>
+        </div>
+    </div>
+
+    <!-- Deploy order -->
+    <h3>Deploy Order (must follow this sequence)</h3>
+    <div class="dep-flow">
+        <div class="dep-row">
+            <div class="gbox p1"><div class="gtitle">Phase 1</div><div class="gsub">SA, AR, buckets, scheduler</div></div>
+            <div class="dep-arrow">&#x2192;</div>
+            <div class="gbox p2"><div class="gtitle">Phase 2</div><div class="gsub">processor, eventarc</div></div>
+            <div class="dep-arrow">&#x2192;</div>
+            <div class="gbox p3"><div class="gtitle">Phase 3</div><div class="gsub">BQ loader, dataset</div></div>
+            <div class="dep-arrow">&#x2192;</div>
+            <div class="gbox p4"><div class="gtitle">Phase 4</div><div class="gsub">dashboard, log sink</div></div>
+        </div>
+    </div>
+
+    <h3>Destroy Order (reverse)</h3>
+    <div class="dep-flow">
+        <div class="dep-row">
+            <div class="gbox p4"><div class="gtitle">Phase 4</div></div>
+            <div class="dep-arrow">&#x2192;</div>
+            <div class="gbox p3"><div class="gtitle">Phase 3</div></div>
+            <div class="dep-arrow">&#x2192;</div>
+            <div class="gbox p2"><div class="gtitle">Phase 2</div></div>
+            <div class="dep-arrow">&#x2192;</div>
+            <div class="gbox p1"><div class="gtitle">Phase 1</div></div>
+        </div>
+    </div>
+</body>
+</html>

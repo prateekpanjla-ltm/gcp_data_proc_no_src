@@ -1,0 +1,6 @@
+[31m╷[0m[0m
+[31m│[0m [0m[1m[31mError: [0m[0m[1mFailed to load "/home/vagrant/Desktop/claude-code-zai/cloud_storage_run_bigquery_data_project/infrastructure/logs/phase2/phase2-layer02-20260306-225836.tfplan" as a plan file[0m
+[31m│[0m [0m
+[31m│[0m [0m[0mError: couldn't load the provided path as either a local plan file (zip:
+[31m│[0m [0mnot a valid zip file) or a saved cloud plan (unexpected end of JSON input)
+[31m╵[0m[0m
