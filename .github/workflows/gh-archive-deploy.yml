@@ -23,7 +23,6 @@ env:
 
 jobs:
   deploy-and-verify:
-    if: false  # Temporarily disabled — remove to re-enable
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
