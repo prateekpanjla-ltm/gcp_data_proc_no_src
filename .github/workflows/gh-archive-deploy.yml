@@ -1,6 +1,7 @@
 name: Deploy & Verify GitHub Archive Pipeline
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - gh_archive_test
