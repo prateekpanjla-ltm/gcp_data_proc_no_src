@@ -1,3 +1,4 @@
+# Destroy workflow for GitHub Archive Pipeline
 name: Destroy GitHub Archive Pipeline
 
 on:
