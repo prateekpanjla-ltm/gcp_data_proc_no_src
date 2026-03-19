@@ -306,6 +306,103 @@ data "terraform_remote_state" "phase1" {
   </div>
 </section>
 
+<!-- ==================== SLIDE 3e: Terraform Dependency Graph (AST) ==================== -->
+<section data-focus="terraform">
+  <h2>Terraform Dependency Graph: Our Actual Pipeline</h2>
+  <p class="subtitle">Terraform builds this graph from our <code>.tf</code> files. Same color = same execution level (created in parallel).</p>
+  <div class="columns">
+    <div class="col" style="flex:0.4">
+      <pre style="font-size:0.55em"><code class="language-hcl"># Phase 1 Terraform (simplified)
+
+resource "google_project_service" "apis" { }
+
+resource "google_service_account" "deployer" {
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_service_account" "cloud_build" {
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_project_iam_member" "build_roles" {
+  member = google_service_account.cloud_build.email
+}
+
+resource "null_resource" "wait_iam" {
+  depends_on = [google_project_iam_member.build_roles]
+}
+
+resource "null_resource" "build_image" {
+  depends_on = [null_resource.wait_iam]
+}
+
+resource "google_cloud_run_v2_job" "downloader" {
+  service_account = google_service_account.deployer.email
+  depends_on = [null_resource.build_image]
+}</code></pre>
+    </div>
+    <div class="col" style="flex:0.6">
+      <pre class="mermaid">
+flowchart TD
+  subgraph L1["Level 1 — Enable APIs"]
+    APIS["google_project_service\napis"]
+  end
+  subgraph L2["Level 2 — Create Identities"]
+    SA_DL["service_account\ndownloader"]
+    SA_CB["service_account\ncloud_build"]
+    BUCKET["storage_bucket\nraw + staging"]
+  end
+  subgraph L3["Level 3 — Grant Permissions"]
+    IAM_DL["iam_member\ndownloader roles"]
+    IAM_CB["iam_member\ncloud_build roles"]
+    AGENT["null_resource\ninit service agents"]
+  end
+  subgraph L4["Level 4 — Verify & Build"]
+    WAIT["null_resource\nwait for IAM"]
+    BUILD["null_resource\nbuild container"]
+  end
+  subgraph L5["Level 5 — Deploy"]
+    JOB["cloud_run_v2_job\ndownloader"]
+  end
+
+  APIS --> SA_DL & SA_CB & BUCKET
+  SA_DL --> IAM_DL
+  SA_CB --> IAM_CB
+  APIS --> AGENT
+  IAM_CB --> WAIT
+  WAIT --> BUILD
+  BUILD --> JOB
+  IAM_DL --> JOB
+  SA_DL --> JOB
+
+  style APIS fill:#e8f0fe,stroke:#1967d2,color:#000
+  style SA_DL fill:#fef7e0,stroke:#b08200,color:#000
+  style SA_CB fill:#fef7e0,stroke:#b08200,color:#000
+  style BUCKET fill:#fef7e0,stroke:#b08200,color:#000
+  style IAM_DL fill:#fce8e6,stroke:#c5221f,color:#000
+  style IAM_CB fill:#fce8e6,stroke:#c5221f,color:#000
+  style AGENT fill:#fce8e6,stroke:#c5221f,color:#000
+  style WAIT fill:#e6f4ea,stroke:#188038,color:#000
+  style BUILD fill:#e6f4ea,stroke:#188038,color:#000
+  style JOB fill:#f3e8fd,stroke:#7627bb,color:#000
+
+  style L1 fill:transparent,stroke:#1967d2,stroke-width:2px,color:#1967d2
+  style L2 fill:transparent,stroke:#b08200,stroke-width:2px,color:#b08200
+  style L3 fill:transparent,stroke:#c5221f,stroke-width:2px,color:#c5221f
+  style L4 fill:transparent,stroke:#188038,stroke-width:2px,color:#188038
+  style L5 fill:transparent,stroke:#7627bb,stroke-width:2px,color:#7627bb
+      </pre>
+    </div>
+  </div>
+  <div style="display:flex;gap:1.5em;justify-content:center;font-size:0.7em;margin-top:0.3em">
+    <span style="color:#1967d2">■ Level 1: APIs</span>
+    <span style="color:#b08200">■ Level 2: Identities + Buckets</span>
+    <span style="color:#c5221f">■ Level 3: IAM Grants</span>
+    <span style="color:#188038">■ Level 4: Verify + Build</span>
+    <span style="color:#7627bb">■ Level 5: Deploy</span>
+  </div>
+</section>
+
 <!-- ==================== SLIDE 4: Three Stage Terraform ==================== -->
 <section data-focus="sa">
   <h2>Three Stages of Terraform IAM</h2>
@@ -462,103 +559,6 @@ flowchart LR
   style CB2 fill:#e6f4ea,stroke:#188038
       </pre>
     </div>
-  </div>
-</section>
-
-<!-- ==================== SLIDE 6b: Terraform Dependency Graph (AST) ==================== -->
-<section data-focus="terraform">
-  <h2>Terraform Dependency Graph: Our Actual Pipeline</h2>
-  <p class="subtitle">Terraform builds this graph from our <code>.tf</code> files. Same color = same execution level (created in parallel).</p>
-  <div class="columns">
-    <div class="col" style="flex:0.4">
-      <pre style="font-size:0.55em"><code class="language-hcl"># Phase 1 Terraform (simplified)
-
-resource "google_project_service" "apis" { }
-
-resource "google_service_account" "deployer" {
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_service_account" "cloud_build" {
-  depends_on = [google_project_service.apis]
-}
-
-resource "google_project_iam_member" "build_roles" {
-  member = google_service_account.cloud_build.email
-}
-
-resource "null_resource" "wait_iam" {
-  depends_on = [google_project_iam_member.build_roles]
-}
-
-resource "null_resource" "build_image" {
-  depends_on = [null_resource.wait_iam]
-}
-
-resource "google_cloud_run_v2_job" "downloader" {
-  service_account = google_service_account.deployer.email
-  depends_on = [null_resource.build_image]
-}</code></pre>
-    </div>
-    <div class="col" style="flex:0.6">
-      <pre class="mermaid">
-flowchart TD
-  subgraph L1["Level 1 — Enable APIs"]
-    APIS["google_project_service\napis"]
-  end
-  subgraph L2["Level 2 — Create Identities"]
-    SA_DL["service_account\ndownloader"]
-    SA_CB["service_account\ncloud_build"]
-    BUCKET["storage_bucket\nraw + staging"]
-  end
-  subgraph L3["Level 3 — Grant Permissions"]
-    IAM_DL["iam_member\ndownloader roles"]
-    IAM_CB["iam_member\ncloud_build roles"]
-    AGENT["null_resource\ninit service agents"]
-  end
-  subgraph L4["Level 4 — Verify & Build"]
-    WAIT["null_resource\nwait for IAM"]
-    BUILD["null_resource\nbuild container"]
-  end
-  subgraph L5["Level 5 — Deploy"]
-    JOB["cloud_run_v2_job\ndownloader"]
-  end
-
-  APIS --> SA_DL & SA_CB & BUCKET
-  SA_DL --> IAM_DL
-  SA_CB --> IAM_CB
-  APIS --> AGENT
-  IAM_CB --> WAIT
-  WAIT --> BUILD
-  BUILD --> JOB
-  IAM_DL --> JOB
-  SA_DL --> JOB
-
-  style APIS fill:#e8f0fe,stroke:#1967d2,color:#000
-  style SA_DL fill:#fef7e0,stroke:#b08200,color:#000
-  style SA_CB fill:#fef7e0,stroke:#b08200,color:#000
-  style BUCKET fill:#fef7e0,stroke:#b08200,color:#000
-  style IAM_DL fill:#fce8e6,stroke:#c5221f,color:#000
-  style IAM_CB fill:#fce8e6,stroke:#c5221f,color:#000
-  style AGENT fill:#fce8e6,stroke:#c5221f,color:#000
-  style WAIT fill:#e6f4ea,stroke:#188038,color:#000
-  style BUILD fill:#e6f4ea,stroke:#188038,color:#000
-  style JOB fill:#f3e8fd,stroke:#7627bb,color:#000
-
-  style L1 fill:transparent,stroke:#1967d2,stroke-width:2px,color:#1967d2
-  style L2 fill:transparent,stroke:#b08200,stroke-width:2px,color:#b08200
-  style L3 fill:transparent,stroke:#c5221f,stroke-width:2px,color:#c5221f
-  style L4 fill:transparent,stroke:#188038,stroke-width:2px,color:#188038
-  style L5 fill:transparent,stroke:#7627bb,stroke-width:2px,color:#7627bb
-      </pre>
-    </div>
-  </div>
-  <div style="display:flex;gap:1.5em;justify-content:center;font-size:0.7em;margin-top:0.3em">
-    <span style="color:#1967d2">■ Level 1: APIs</span>
-    <span style="color:#b08200">■ Level 2: Identities + Buckets</span>
-    <span style="color:#c5221f">■ Level 3: IAM Grants</span>
-    <span style="color:#188038">■ Level 4: Verify + Build</span>
-    <span style="color:#7627bb">■ Level 5: Deploy</span>
   </div>
 </section>
 
