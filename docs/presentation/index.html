@@ -565,6 +565,56 @@ flowchart LR
   </div>
 </section>
 
+<!-- ==================== SLIDE 6c: Why tokenCreator? (explainer) ==================== -->
+<section data-focus="agents">
+  <h2>Why Do We Need tokenCreator?</h2>
+  <p class="subtitle">Cloud Run rejects unauthenticated HTTP requests. Every trigger must present a valid OIDC token.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>The Problem</h4>
+        <ol style="font-size:0.75em">
+          <li>Cloud Scheduler fires on a cron schedule</li>
+          <li>It needs to call our Cloud Run Job via HTTPS</li>
+          <li>Cloud Run requires an <strong>OIDC identity token</strong> in the request header</li>
+          <li>Scheduler doesn't have its own credentials — it relies on a <strong>service agent</strong> to mint the token</li>
+          <li>The service agent can only mint a token <strong>for a specific SA</strong> if it has <code>tokenCreator</code> permission on that SA</li>
+        </ol>
+      </div>
+      <div class="box red">
+        <h4>What happens without it?</h4>
+        <p style="font-size:0.75em">Scheduler fires → agent tries to mint token → <strong>PERMISSION_DENIED</strong> → Cloud Run never receives the request. No error in Cloud Run logs because the request never arrives. You only see the failure in Scheduler logs.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>The Fix in Terraform</h4>
+        <pre><code class="language-hcl"># Grant Scheduler service agent
+# tokenCreator on Scheduler SA
+resource "google_service_account_iam_member" "sched" {
+  service_account_id = google_service_account
+                        .scheduler.name
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:service-${
+    local.project_number
+  }@gcp-sa-cloudscheduler.iam..."
+}
+
+# Same pattern for Pub/Sub agent
+# (needed for Eventarc triggers)
+resource "google_service_account_iam_member" "pubsub" {
+  service_account_id = google_service_account
+                        .eventarc_invoker.name
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:service-${
+    local.project_number
+  }@gcp-sa-pubsub.iam..."
+}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ==================== SLIDE 7: tokenCreator ==================== -->
 <section data-focus="agents">
   <h2>tokenCreator: The Authentication Chain</h2>
