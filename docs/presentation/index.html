@@ -616,42 +616,6 @@ sequenceDiagram
   <p><span class="tag red">Key:</span> actAs = associate SA with resource (deploy time) | tokenCreator = service agent mints auth tokens (runtime)</p>
 </section>
 
-<!-- ==================== SLIDE 8: Service Agents ==================== -->
-<section data-focus="agents">
-  <h2>Service Agents Are NOT Auto-Created</h2>
-  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists. We use service agents in <strong>Phase 1</strong> (Scheduler agent → Cloud Run Job), <strong>Phase 2</strong> (Storage + Eventarc + Pub/Sub agents → Cloud Run Service), and <strong>Phase 3</strong> (same agents → Cloud Function).</p>
-  <div class="columns">
-    <div class="col">
-      <pre><code class="language-hcl"># You'd expect this to work:
-resource "google_project_service" "eventarc" {
-  service = "eventarc.googleapis.com"
-}
-resource "google_project_iam_member" "..." {
-  member = "serviceAccount:
-    service-NUM@gcp-sa-eventarc..."
-  depends_on = [...eventarc]
-}
-# FAILS: SA does not exist!</code></pre>
-    </div>
-    <div class="col">
-      <pre><code class="language-hcl"># Fix: Explicitly activate agents
-resource "null_resource" "init_agents" {
-  depends_on = [google_project_service.eventarc]
-  provisioner "local-exec" {
-    command = <<-SCRIPT
-      gcloud beta services identity create \
-        --service=storage.googleapis.com
-      gcloud beta services identity create \
-        --service=eventarc.googleapis.com
-    SCRIPT
-  }
-}</code></pre>
-    </div>
-  </div>
-  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then use Terraform's <code>depends_on</code> (which controls resource creation order) to wait for this activation step before attempting to grant permissions to the agent.</p>
-  <p><span class="tag yellow">Note:</span> Terraform's <code>depends_on</code> only ensures ordering — it waits for the API resource to report "enabled", NOT for the service agent to actually exist. That's why the explicit activation step is needed.</p>
-</section>
-
 <!-- ==================== SLIDE 9: IAM Propagation ==================== -->
 <section data-focus="cloudbuild">
   <h2>IAM Propagation: Eventually Consistent</h2>
@@ -792,6 +756,42 @@ flowchart LR
   style CRJ fill:#e8f0fe,stroke:#1967d2
   style CRS fill:#e8f0fe,stroke:#1967d2
   </pre>
+</section>
+
+<!-- ==================== SLIDE 10c: Service Agents NOT Auto-Created ==================== -->
+<section data-focus="agents">
+  <h2>Service Agents Are NOT Auto-Created</h2>
+  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists. We use service agents in <strong>Phase 1</strong> (Scheduler agent → Cloud Run Job), <strong>Phase 2</strong> (Storage + Eventarc + Pub/Sub agents → Cloud Run Service), and <strong>Phase 3</strong> (same agents → Cloud Function).</p>
+  <div class="columns">
+    <div class="col">
+      <pre><code class="language-hcl"># You'd expect this to work:
+resource "google_project_service" "eventarc" {
+  service = "eventarc.googleapis.com"
+}
+resource "google_project_iam_member" "..." {
+  member = "serviceAccount:
+    service-NUM@gcp-sa-eventarc..."
+  depends_on = [...eventarc]
+}
+# FAILS: SA does not exist!</code></pre>
+    </div>
+    <div class="col">
+      <pre><code class="language-hcl"># Fix: Explicitly activate agents
+resource "null_resource" "init_agents" {
+  depends_on = [google_project_service.eventarc]
+  provisioner "local-exec" {
+    command = <<-SCRIPT
+      gcloud beta services identity create \
+        --service=storage.googleapis.com
+      gcloud beta services identity create \
+        --service=eventarc.googleapis.com
+    SCRIPT
+  }
+}</code></pre>
+    </div>
+  </div>
+  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then use Terraform's <code>depends_on</code> (which controls resource creation order) to wait for this activation step before attempting to grant permissions to the agent.</p>
+  <p><span class="tag yellow">Note:</span> Terraform's <code>depends_on</code> only ensures ordering — it waits for the API resource to report "enabled", NOT for the service agent to actually exist. That's why the explicit activation step is needed.</p>
 </section>
 
 <!-- ==================== SLIDE 11: Destroy & Reprovision ==================== -->
