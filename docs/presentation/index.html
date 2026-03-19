@@ -143,6 +143,163 @@ flowchart TD
   </div>
 </section>
 
+<!-- ==================== SLIDE 3b: How Terraform Works ==================== -->
+<section data-focus="terraform">
+  <h2>How Terraform Works</h2>
+  <p>Terraform reads <code>.tf</code> files, builds a <strong>dependency graph</strong> (like an AST), determines the order of operations, and applies changes to match the desired state.</p>
+  <div class="columns">
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  TF[".tf files\n(HCL code)"] -->|"1. Parse"| AST["Dependency Graph\n(resource DAG)"]
+  AST -->|"2. Plan"| PLAN["Execution Plan\nwhat to create/update/destroy"]
+  PLAN -->|"3. Apply"| GCP["GCP APIs\ncreate resources in order"]
+  GCP -->|"4. Store"| STATE["State File\n(terraform.tfstate)\ntracks what exists"]
+  STATE -.->|"next run: compare"| TF
+  style AST fill:#fef7e0,stroke:#b08200
+  style STATE fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <div class="box">
+        <h4>The Dependency Graph</h4>
+        <ul>
+          <li>Terraform reads all <code>.tf</code> files and builds a <strong>directed acyclic graph (DAG)</strong></li>
+          <li>Each resource is a node; references between resources create edges</li>
+          <li>Terraform walks the graph in topological order — creating dependencies first</li>
+          <li>Resources with no dependencies are created <strong>in parallel</strong></li>
+        </ul>
+      </div>
+      <div class="box yellow">
+        <h4>State File</h4>
+        <ul>
+          <li>After apply, Terraform records what it created in a state file</li>
+          <li>Next run: compares desired state (.tf files) vs actual state (state file)</li>
+          <li>Only applies the <strong>difference</strong> — not everything from scratch</li>
+          <li>We store state in GCS bucket for team access</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3c: Explicit vs Implicit depends_on ==================== -->
+<section data-focus="terraform">
+  <h2>Terraform Dependencies: Implicit vs Explicit</h2>
+  <p>Terraform automatically detects dependencies from resource references. But sometimes you need to force ordering manually.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Implicit (automatic)</h4>
+        <p style="font-size:0.75em">When one resource references another, Terraform knows the order automatically.</p>
+      </div>
+      <pre><code class="language-hcl"># Terraform sees: Cloud Run references SA
+# → creates SA first, then Cloud Run
+resource "google_service_account" "processor" {
+  account_id = "test-processor"
+}
+
+resource "google_cloud_run_v2_service" "svc" {
+  # This reference creates an implicit dependency:
+  service_account = google_service_account.processor.email
+  # ^^^ Terraform knows: create SA before Cloud Run
+}</code></pre>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4>Explicit (manual — <code>depends_on</code>)</h4>
+        <p style="font-size:0.75em">When there's no direct reference but ordering still matters — like IAM needing time to propagate.</p>
+      </div>
+      <pre><code class="language-hcl"># No reference between these resources,
+# but Cloud Run NEEDS the image to exist first
+resource "null_resource" "build_image" {
+  provisioner "local-exec" {
+    command = "gcloud builds submit ..."
+  }
+}
+
+resource "google_cloud_run_v2_service" "svc" {
+  image = "us-central1-docker.pkg.dev/.../latest"
+  # Terraform can't see the connection — force it:
+  depends_on = [null_resource.build_image]
+}</code></pre>
+    </div>
+  </div>
+  <pre class="mermaid">
+flowchart LR
+  subgraph "Implicit (auto-detected)"
+    SA1[Service Account] -->|"referenced by"| CR1[Cloud Run]
+  end
+  subgraph "Explicit (depends_on)"
+    BUILD[null_resource\nbuild image] -->|"depends_on"| CR2[Cloud Run]
+    IAM[IAM Grant] -->|"depends_on"| WAIT[null_resource\nwait for propagation]
+    WAIT -->|"depends_on"| BUILD
+  end
+  style SA1 fill:#e6f4ea,stroke:#188038
+  style BUILD fill:#fef7e0,stroke:#b08200
+  style WAIT fill:#fce8e6,stroke:#c5221f
+  </pre>
+</section>
+
+<!-- ==================== SLIDE 3d: null_resource and data sources ==================== -->
+<section data-focus="terraform">
+  <h2>Terraform Escape Hatches: null_resource & data</h2>
+  <p>When Terraform can't do something natively, these two constructs fill the gap.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4><code>null_resource</code> + <code>local-exec</code></h4>
+        <p style="font-size:0.75em">Runs arbitrary shell commands during <code>terraform apply</code>. We use it for things Terraform can't do natively.</p>
+      </div>
+      <pre><code class="language-hcl"># Use case 1: Activate service agents
+resource "null_resource" "init_agents" {
+  provisioner "local-exec" {
+    command = "gcloud beta services identity create ..."
+  }
+}
+
+# Use case 2: Build container images
+resource "null_resource" "build_image" {
+  triggers = { hash = filesha256("Dockerfile") }
+  provisioner "local-exec" {
+    command = "gcloud builds submit ..."
+  }
+}
+
+# Use case 3: Wait for IAM propagation
+resource "null_resource" "wait_iam" {
+  provisioner "local-exec" {
+    command = "# poll until permission is active"
+  }
+}</code></pre>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4><code>data</code> sources</h4>
+        <p style="font-size:0.75em">Read-only lookups — fetch information from GCP without creating anything. Used to get project numbers, existing resources, etc.</p>
+      </div>
+      <pre><code class="language-hcl"># Look up project number (needed for service agents)
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+# Use it to reference service agents:
+resource "google_service_account_iam_member" "token" {
+  member = "serviceAccount:service-${
+    data.google_project.current.number
+  }@gcp-sa-cloudscheduler.iam..."
+}
+
+# Look up remote Terraform state from another phase:
+data "terraform_remote_state" "phase1" {
+  backend = "gcs"
+  config  = { bucket = "...", prefix = "phase1" }
+}
+# Use: data.terraform_remote_state.phase1.outputs.sa_email</code></pre>
+    </div>
+  </div>
+</section>
+
 <!-- ==================== SLIDE 4: Three Stage Terraform ==================== -->
 <section data-focus="sa">
   <h2>Three Stages of Terraform IAM</h2>
