@@ -236,6 +236,16 @@ gcloud iam service-accounts \
       </div>
     </div>
   </div>
+  <pre class="mermaid">
+flowchart LR
+  TF[Terraform Deployer SA] -->|"1. CREATE SA\niam.serviceAccountAdmin"| SA[Processor SA\nnewly created]
+  TF -->|"2. ASSOCIATE SA\niam.serviceAccountUser\n(actAs)"| CR[Cloud Run Service\nservice_account = processor-sa]
+  SA -.->|"attached to"| CR
+  TF -.->|"Without actAs:\nCREATE succeeds\nASSOCIATE fails ❌"| CR
+  style TF fill:#fef7e0,stroke:#b08200
+  style SA fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8eaf0,stroke:#1a56db
+  </pre>
 </section>
 
 <!-- ==================== SLIDE 6: Associate in Practice ==================== -->
@@ -250,12 +260,14 @@ gcloud iam service-accounts \
           <li>Cloud Build: build + push image ONLY</li>
           <li>Terraform: creates Cloud Run with runtime SA</li>
           <li>Associate needed: <strong>Deployer SA only</strong></li>
+          <li>Deployer needs <code>actAs</code> on Cloud Build SA (to submit build)</li>
+          <li>Deployer needs <code>actAs</code> on runtime SAs (to attach to Cloud Run)</li>
         </ul>
       </div>
       <pre class="mermaid">
 flowchart LR
-  D1[Deployer SA] -->|"gcloud builds submit\n--service-account=build-sa"| CB1[Cloud Build SA\nbuilds image only]
-  D1 -->|"terraform apply\nassociates runtime SA"| CR1[Cloud Run\nservice_account=processor-sa]
+  D1[Deployer SA] -->|"actAs on build-sa\ngcloud builds submit"| CB1[Cloud Build SA\nbuilds image only]
+  D1 -->|"actAs on processor-sa\nterraform apply"| CR1[Cloud Run\nservice_account=processor-sa]
   style D1 fill:#fef7e0,stroke:#b08200
   style CB1 fill:#e6f4ea,stroke:#188038
       </pre>
@@ -265,14 +277,15 @@ flowchart LR
         <h4>Approach B: Cloud Build Deploys <span class="tag yellow">Alternative</span></h4>
         <ul>
           <li>Cloud Build: build + push + <code>gcloud run deploy</code></li>
-          <li>Associate needed: <strong>Cloud Build SA + deployer on CB SA</strong></li>
-          <li>Faster CI/CD, but broader permissions</li>
+          <li>Deployer needs <code>actAs</code> on Cloud Build SA (to submit build)</li>
+          <li>Cloud Build SA needs <code>actAs</code> on runtime SA (to attach to Cloud Run)</li>
+          <li>Two hops of associate — broader permissions needed</li>
         </ul>
       </div>
       <pre class="mermaid">
 flowchart LR
-  D2[Deployer SA] -->|"gcloud builds submit\n--service-account=build-sa"| CB2[Cloud Build SA]
-  CB2 -->|"gcloud run deploy\n--service-account=processor-sa"| CR2[Cloud Run]
+  D2[Deployer SA] -->|"actAs on build-sa"| CB2[Cloud Build SA]
+  CB2 -->|"actAs on processor-sa\ngcloud run deploy"| CR2[Cloud Run]
   style D2 fill:#fef7e0,stroke:#b08200
   style CB2 fill:#e6f4ea,stroke:#188038
       </pre>
@@ -283,6 +296,7 @@ flowchart LR
 <!-- ==================== SLIDE 7: tokenCreator ==================== -->
 <section>
   <h2>tokenCreator: The Authentication Chain</h2>
+  <p class="subtitle">This involves <strong>Google-managed Service Agents</strong> (not our Service Accounts). Service agents handle infrastructure plumbing — routing events, minting tokens — and need explicit permission grants.</p>
   <div class="columns">
     <div class="col" style="flex:1.2">
       <div class="box yellow">
@@ -290,22 +304,23 @@ flowchart LR
         <ul>
           <li>Cloud Scheduler needs to call Cloud Run via HTTP</li>
           <li>Cloud Run requires authentication (OIDC token)</li>
-          <li>Scheduler can't mint tokens itself — it asks its <strong>service agent</strong></li>
-          <li>Agent needs <code>tokenCreator</code> ON the scheduler SA to mint the token</li>
+          <li>Scheduler can't mint tokens — it delegates to its <strong>service agent</strong></li>
+          <li>The <strong>Scheduler service agent</strong> (Google-managed) needs <code>tokenCreator</code> ON the scheduler SA to mint the token</li>
         </ul>
       </div>
       <div class="box red">
-        <h4>Same pattern for Eventarc</h4>
+        <h4>Same pattern for Eventarc (Pub/Sub service agent)</h4>
         <ul>
-          <li>GCS event → Pub/Sub delivers to Cloud Run</li>
+          <li>GCS event → <strong>Pub/Sub service agent</strong> delivers to Cloud Run</li>
           <li>Pub/Sub agent needs <code>tokenCreator</code> ON invoker SA</li>
           <li>Without it: event delivered, Cloud Run returns <strong>403 silently</strong></li>
         </ul>
       </div>
-      <pre><code class="language-hcl"># Terraform fix:
+      <pre><code class="language-hcl"># Terraform: grant tokenCreator to SERVICE AGENT
 resource "google_service_account_iam_member" "token" {
   service_account_id = google_service_account.scheduler.name
   role         = "roles/iam.serviceAccountTokenCreator"
+  # member is the SERVICE AGENT, not our SA:
   member       = "serviceAccount:service-NUM@gcp-sa-cloudscheduler..."
 }</code></pre>
     </div>
@@ -313,7 +328,7 @@ resource "google_service_account_iam_member" "token" {
       <pre class="mermaid">
 sequenceDiagram
   participant CS as Cloud Scheduler
-  participant CSA as Scheduler Agent
+  participant CSA as Scheduler Service Agent
   participant SA as Scheduler SA
   participant CR as Cloud Run Job
   CS->>CSA: I need to call Cloud Run
@@ -326,7 +341,7 @@ sequenceDiagram
       </pre>
     </div>
   </div>
-  <p><span class="tag red">Key:</span> actAs = associate SA with resource (deploy time) | tokenCreator = mint auth tokens as SA (runtime)</p>
+  <p><span class="tag red">Key:</span> actAs = associate SA with resource (deploy time) | tokenCreator = service agent mints auth tokens (runtime)</p>
 </section>
 
 <!-- ==================== SLIDE 8: Service Agents ==================== -->
@@ -361,8 +376,8 @@ resource "null_resource" "init_agents" {
 }</code></pre>
     </div>
   </div>
-  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then <code>depends_on</code> this resource, ensuring the agent exists before we try to grant it permissions.</p>
-  <p><span class="tag yellow">Note:</span> <code>depends_on</code> waits for API "enabled" — NOT for the service agent to exist</p>
+  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then use Terraform's <code>depends_on</code> (which controls resource creation order) to wait for this activation step before attempting to grant permissions to the agent.</p>
+  <p><span class="tag yellow">Note:</span> Terraform's <code>depends_on</code> only ensures ordering — it waits for the API resource to report "enabled", NOT for the service agent to actually exist. That's why the explicit activation step is needed.</p>
 </section>
 
 <!-- ==================== SLIDE 9: IAM Propagation ==================== -->
@@ -397,21 +412,29 @@ done</code></pre>
       </div>
     </div>
   </div>
-  <div class="box">
-    <h4>All 4 checks must pass before <code>gcloud builds submit</code></h4>
-    <ul style="columns:2">
-      <li>Check 1: Can deployer impersonate Cloud Build SA (tokenCreator)</li>
-      <li>Check 2: Does Cloud Build SA have <code>cloudbuild.builds.create</code></li>
-      <li>Check 3: Does Cloud Build SA have <code>storage.objects.create</code></li>
-      <li>Check 4: Does Cloud Build SA have <code>storage.objects.get</code></li>
-    </ul>
-  </div>
+  <pre class="mermaid">
+sequenceDiagram
+  participant TF as Terraform
+  participant IAM as GCP IAM
+  participant PT as Policy Troubleshooter
+  participant CB as Cloud Build
+  TF->>IAM: Grant roles to Cloud Build SA
+  IAM-->>TF: OK (recorded, not yet enforced)
+  loop Every 10s, up to 180s
+    TF->>PT: Check 1: tokenCreator propagated?
+    TF->>PT: Check 2: cloudbuild.builds.create?
+    TF->>PT: Check 3: storage.objects.create?
+    TF->>PT: Check 4: storage.objects.get?
+    PT-->>TF: NOT YET / GRANTED
+  end
+  TF->>CB: gcloud builds submit (all 4 GRANTED)
+  </pre>
 </section>
 
 <!-- ==================== SLIDE 10: Eventarc Chain ==================== -->
 <section>
   <h2>The Eventarc Chain: 5 Bindings, All Required</h2>
-  <p><span class="highlight">Miss one binding and it fails silently.</span> Three service agents involved: Storage, Eventarc, and Pub/Sub.</p>
+  <p><span class="highlight">Miss one binding and it fails silently.</span> This chain is used in <strong>Phase 2</strong> (GCS → processor) and <strong>Phase 3</strong> (GCS → BQ loader). Three service agents involved: Storage, Eventarc, and Pub/Sub.</p>
   <pre class="mermaid">
 flowchart LR
   GCS[GCS\nfile upload] -->|"1. Storage agent\npubsub.publisher"| PS[Pub/Sub]
@@ -489,7 +512,53 @@ destroy.yml          # manual with confirmation</code></pre>
   </div>
 </section>
 
-<!-- ==================== SLIDE 12: Key Takeaways ==================== -->
+<!-- ==================== SLIDE 12: Orphaned IAM Bindings ==================== -->
+<section>
+  <h2>Orphaned IAM Bindings After Destroy</h2>
+  <p>When Terraform destroys SAs, GCP renames them to <code>deleted:serviceAccount:email?uid=...</code> but <strong>IAM bindings referencing them remain</strong> in the project policy.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>The problem</h4>
+        <ul>
+          <li>After <code>terraform destroy</code>, deleted SAs leave orphaned references</li>
+          <li>On redeploy, Terraform creates SA with same email but new UID</li>
+          <li>Old orphaned bindings can conflict with new ones</li>
+          <li>We found 20+ orphaned entries in our project after destroy</li>
+        </ul>
+      </div>
+      <pre><code class="language-bash"># Check for orphaned bindings:
+gcloud projects get-iam-policy PROJECT \
+  --format=json | grep "deleted:serviceAccount:"
+
+# Example output:
+"deleted:serviceAccount:test-cloud-build@
+  project.iam...?uid=113536875676481232802"</code></pre>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>The fix (automated in destroy script)</h4>
+        <ul>
+          <li>Added as final step in <code>destroy-all-phases.sh</code></li>
+          <li>Fetches project IAM policy as JSON</li>
+          <li>Strips all <code>deleted:serviceAccount:...</code> members</li>
+          <li>Re-applies cleaned policy</li>
+          <li>Runs automatically on every destroy</li>
+        </ul>
+      </div>
+      <pre class="mermaid">
+flowchart LR
+  D[terraform destroy] --> O[Orphaned bindings\ndeleted:serviceAccount:...]
+  O --> C[Cleanup script\nstrips deleted members]
+  C --> P[Clean IAM policy\nready for redeploy]
+  style O fill:#fce8e6,stroke:#c5221f
+  style P fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 13: Key Takeaways ==================== -->
 <section>
   <h2>Key Takeaways</h2>
   <ol>
