@@ -149,8 +149,8 @@ flowchart TD
   <p>Terraform reads <code>.tf</code> files, builds a <strong>dependency graph</strong> (like an AST), determines the order of operations, and applies changes to match the desired state.</p>
   <div class="columns">
     <div class="col">
-      <pre class="mermaid" style="min-height:400px">
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'18px'}, 'flowchart': {'nodeSpacing': 30, 'rankSpacing': 40}}}%%
+      <pre class="mermaid" style="min-height:500px">
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'22px'}, 'flowchart': {'nodeSpacing': 45, 'rankSpacing': 60}}}%%
 flowchart TD
   TF[".tf files\n(HCL code)"] -->|"1. Parse"| AST["Dependency Graph\n(resource DAG)"]
   AST -->|"2. Plan"| PLAN["Execution Plan\nwhat to create/update/destroy"]
@@ -223,8 +223,8 @@ flowchart LR
         <h4>Explicit (manual — <code>depends_on</code>)</h4>
         <p style="font-size:0.75em">When there's no direct reference but ordering still matters — like IAM needing time to propagate.</p>
       </div>
-      <pre><code class="language-hcl"># No reference between these resources,
-# but Cloud Run NEEDS the image to exist first
+      <pre style="font-size:0.65em;text-align:left;background:#f8f9fa;padding:0.8em;border-radius:8px;border:1px solid #ddd"><span style="color:#888"># No reference between these resources,</span>
+<span style="color:#888"># but Cloud Run NEEDS the image to exist first</span>
 resource "null_resource" "build_image" {
   provisioner "local-exec" {
     command = "gcloud builds submit ..."
@@ -233,9 +233,9 @@ resource "null_resource" "build_image" {
 
 resource "google_cloud_run_v2_service" "svc" {
   image = "us-central1-docker.pkg.dev/.../latest"
-  # Terraform can't see the connection — force it:
+  <span style="color:#888"># Terraform can't see the connection — force it:</span>
   depends_on = [null_resource.build_image]
-}</code></pre>
+}</pre>
       <pre class="mermaid">
 flowchart LR
   IAM[IAM Grant] -->|"depends_on"| WAIT[null_resource\nwait]
@@ -344,8 +344,8 @@ data "terraform_remote_state" "phase1" {
 <span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">}</span></pre>
     </div>
     <div class="col" style="flex:0.6">
-      <pre class="mermaid" style="min-height:450px">
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'16px'}, 'flowchart': {'nodeSpacing': 25, 'rankSpacing': 35}}}%%
+      <pre class="mermaid" style="min-height:550px">
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'20px'}, 'flowchart': {'nodeSpacing': 35, 'rankSpacing': 50}}}%%
 flowchart TD
   subgraph L1["Level 1 — Enable APIs"]
     APIS["google_project_service\napis"]
