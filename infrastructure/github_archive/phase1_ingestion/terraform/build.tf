@@ -66,6 +66,16 @@ resource "null_resource" "wait_for_iam_propagation" {
           check_passed "Check 3 (storage.objects.create)" "$RESULT3" || ALL_PASSED=false
         fi
 
+        # Check 4: Does Cloud Build SA have storage.objects.get?
+        if [ "$ALL_PASSED" = true ]; then
+          RESULT4=$(gcloud policy-troubleshoot iam \
+            "//storage.googleapis.com/projects/_/buckets/$BUCKET" \
+            --principal-email="$SA" \
+            --permission="storage.objects.get" \
+            --format="value(access)" 2>/dev/null)
+          check_passed "Check 4 (storage.objects.get)" "$RESULT4" || ALL_PASSED=false
+        fi
+
         if [ "$ALL_PASSED" = true ]; then
           echo "=== All IAM checks passed ==="
           exit 0
