@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IAM Lessons from Deploying GCP Infrastructure with Terraform</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
+  <style>
+    :root { --r-heading-color: #1a56db; --r-link-color: #1a56db; }
+    .reveal { font-size: 22px; }
+    .reveal h1 { color: #1a56db; font-size: 1.5em; margin-bottom: 5px; }
+    .reveal h2 { color: #1a56db; font-size: 1.3em; margin-bottom: 8px; }
+    .reveal section { padding-top: 10px !important; text-align: left; }
+    .reveal .subtitle { color: #666; font-size: 0.75em; margin: 0 0 8px 0; }
+    .reveal pre { font-size: 0.55em; box-shadow: none; margin: 5px 0; }
+    .reveal pre code { padding: 10px; border-radius: 6px; }
+    .reveal .columns { display: flex; gap: 20px; }
+    .reveal .col { flex: 1; }
+    .reveal .box { background: #f0f2f8; border-radius: 6px; padding: 12px; margin: 6px 0; border-left: 4px solid #1a56db; }
+    .reveal .box.green { border-left-color: #188038; }
+    .reveal .box.yellow { border-left-color: #b08200; }
+    .reveal .box.red { border-left-color: #c5221f; }
+    .reveal .box h4 { margin: 0 0 6px 0; font-size: 0.9em; }
+    .reveal .box ul { margin: 0; font-size: 0.8em; }
+    .reveal .box li { margin: 3px 0; }
+    .reveal .highlight { color: #c5221f; font-weight: bold; }
+    .reveal .accent { color: #1a56db; font-weight: bold; }
+    .reveal .muted { color: #888; font-size: 0.75em; }
+    .reveal .tag { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.7em; font-weight: bold; background: #e8eaf0; color: #1a56db; }
+    .reveal .tag.green { background: #e6f4ea; color: #188038; }
+    .reveal .tag.red { background: #fce8e6; color: #c5221f; }
+    .reveal .tag.yellow { background: #fef7e0; color: #b08200; }
+    .reveal .analogy { background: #fff8e1; border-left: 4px solid #b08200; padding: 10px 15px; border-radius: 6px; margin: 8px 0; font-style: italic; font-size: 0.85em; }
+    .reveal .center { text-align: center; }
+    .reveal .mermaid { font-size: 0.7em; }
+    .reveal table { font-size: 0.75em; margin: 8px auto; }
+    .reveal table th { background: #1a56db; color: white; padding: 8px 14px; }
+    .reveal table td { padding: 6px 14px; border-bottom: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ==================== SLIDE 1: Title ==================== -->
+<section class="center">
+  <h1 style="font-size:1.6em">IAM Lessons from Deploying<br>GCP Infrastructure with Terraform</h1>
+  <p class="subtitle">How we manage access control for cloud automation — and what the documentation doesn't tell you</p>
+  <br>
+  <p>Prateek Panjla</p>
+</section>
+
+<!-- ==================== SLIDE 2: What I Built ==================== -->
+<section>
+  <h2>What I Built</h2>
+  <p>An automated data pipeline that processes public GitHub event data — <strong>fully deployed and destroyed by code</strong>, no manual steps.</p>
+  <div class="columns">
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  GH[GitHub Archive\nhourly data feed] --> P1
+  P1[Step 1: Download\nCloud Run Job] -->|auto-trigger| P2
+  P2[Step 2: Process\nCloud Run Service] -->|auto-trigger| P3
+  P3[Step 3: Load\nCloud Function] --> BQ[(Data Warehouse\nBigQuery)]
+  P4[Step 4: Monitoring\nDashboards + Alerts] -.-> P1 & P2 & P3
+  style P1 fill:#e8eaf0,stroke:#1a56db
+  style P2 fill:#e8eaf0,stroke:#1a56db
+  style P3 fill:#e8eaf0,stroke:#1a56db
+  style P4 fill:#fef7e0,stroke:#b08200
+  style BQ fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>Why this matters</h4>
+        <ul>
+          <li>Everything defined in code (Infrastructure as Code)</li>
+          <li>One command deploys the entire system</li>
+          <li>One command tears it all down</li>
+          <li>Rebuild from scratch in under 10 minutes</li>
+          <li>Every permission is auditable and version-controlled</li>
+        </ul>
+      </div>
+      <div class="analogy">Think of it as a blueprint for a building — we can demolish it and rebuild the exact same building from the blueprint, including all the locks and keys.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3: Why IaC ==================== -->
+<section>
+  <h2>Why Manage Permissions in Code?</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>Without Infrastructure as Code</h4>
+        <ul>
+          <li>Permissions granted manually via web console</li>
+          <li>No record of who granted what or when</li>
+          <li>"It works on my machine" — can't reproduce</li>
+          <li>Forgotten permissions accumulate over time</li>
+          <li>Audit = screenshot archaeology</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>With Infrastructure as Code (Terraform)</h4>
+        <ul>
+          <li>Every permission is a line of code in Git</li>
+          <li>Pull request = permission review before it's applied</li>
+          <li>Full history: who changed what, when, why</li>
+          <li>Destroy + rebuild proves no hidden manual steps</li>
+          <li>Audit = read the code</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="analogy">Imagine if every office key card assignment had to go through a pull request. That's what we're doing for cloud permissions.</div>
+</section>
+
+<!-- ==================== SLIDE 4: 3-Layer Model ==================== -->
+<section>
+  <h2>Three Types of Identities in GCP</h2>
+  <p>Every action in GCP is performed by an identity. We use three types:</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4><span class="tag yellow">Type 1</span> Deployer Account</h4>
+        <p style="font-size:0.8em">"The construction crew"</p>
+        <ul>
+          <li>Runs the automation (Terraform)</li>
+          <li>Builds and configures everything</li>
+          <li>Has broad permissions — but only for setup</li>
+          <li>Needs permission to assign other accounts to services</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4><span class="tag green">Type 2</span> Runtime Accounts</h4>
+        <p style="font-size:0.8em">"The employees with specific job roles"</p>
+        <ul>
+          <li>One per service (downloader, processor, loader)</li>
+          <li>Minimal permissions — only what the service needs</li>
+          <li>If compromised, blast radius is limited</li>
+          <li>Created by the deployer, used by the service</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4><span class="tag red">Type 3</span> Google Service Agents</h4>
+        <p style="font-size:0.8em">"The building management system"</p>
+        <ul>
+          <li>Google-managed, handles infrastructure plumbing</li>
+          <li>Routes events between services</li>
+          <li>Generates authentication tokens</li>
+          <li>Needs explicit permission grants (not automatic!)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="analogy">Most tutorials use one account with full access (like giving every employee a master key). We use separate accounts with minimum permissions (like specific key cards per floor).</div>
+</section>
+
+<!-- ==================== SLIDE 5: The Associate Permission ==================== -->
+<section>
+  <h2>Lesson 1: The "Associate" Permission</h2>
+  <p>When our automation creates a service, it needs permission to <strong>assign an identity</strong> to that service.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>The confusing part</h4>
+        <ul>
+          <li>GCP calls this permission "actAs" (and sometimes "impersonation")</li>
+          <li>It's neither — it's really <strong>"associate this account with this service"</strong></li>
+          <li>Google's own docs page is titled "Attach service accounts to resources"</li>
+          <li>The permission name (<code>serviceAccountUser</code>) sounds like "use the account" — but it means "assign it"</li>
+        </ul>
+      </div>
+      <div class="box red">
+        <h4>Why it catches people off guard</h4>
+        <ul>
+          <li><strong>Creating</strong> an account needs one permission</li>
+          <li><strong>Assigning</strong> that account to a service needs a <em>different</em> permission</li>
+          <li>Most people assume creating = ability to use. It's not.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  D[Deployer\ncreates accounts\n+ builds services] -->|"needs ASSOCIATE\npermission"| R1[Downloader Account\nassigned to\nDownload Service]
+  D -->|"needs ASSOCIATE\npermission"| R2[Processor Account\nassigned to\nProcessing Service]
+  D -->|"needs ASSOCIATE\npermission"| R3[Loader Account\nassigned to\nBigQuery Loader]
+  style D fill:#fef7e0,stroke:#b08200
+  style R1 fill:#e6f4ea,stroke:#188038
+  style R2 fill:#e6f4ea,stroke:#188038
+  style R3 fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 6: Proven via Audit Logs ==================== -->
+<section>
+  <h2>We Proved It with Audit Logs</h2>
+  <p>We ran an experiment: removed the "associate" permission, enabled detailed logging, and compared.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>With permission <span class="tag green">Build succeeded</span></h4>
+        <table>
+          <tr><th>Who</th><th>Action</th><th>Result</th></tr>
+          <tr><td>Deployer</td><td>Submit build</td><td>Allowed</td></tr>
+          <tr><td>Google agent</td><td>Look up account</td><td>Allowed</td></tr>
+          <tr><td>Deployer</td><td><strong>Associate account</strong></td><td><strong>Allowed</strong></td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4>Without permission <span class="tag red">Build failed</span></h4>
+        <table>
+          <tr><th>Who</th><th>Action</th><th>Result</th></tr>
+          <tr><td>Google agent</td><td>Look up account</td><td>Allowed</td></tr>
+          <tr><td>Deployer</td><td><strong>Associate account</strong></td><td><strong>Denied</strong></td></tr>
+        </table>
+        <p class="muted">Build rejected before it even started</p>
+      </div>
+    </div>
+  </div>
+  <div class="box">
+    <h4>Key finding</h4>
+    <ul>
+      <li>Only the "associate" permission was checked — no other special permissions needed</li>
+      <li>We also found our deployer had an unnecessary permission (<code>tokenCreator</code>) that we safely removed</li>
+      <li><strong>Takeaway:</strong> Enable audit logging to verify your security model — don't just trust documentation</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 7: Token Creator ==================== -->
+<section>
+  <h2>Lesson 2: Authentication Between Services</h2>
+  <p>When one service needs to call another, it needs a <strong>temporary credential (token)</strong>. Someone has to create that token.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>The scenario</h4>
+        <ul>
+          <li>A scheduler triggers a data processing job every hour</li>
+          <li>The processing job requires authentication (no anonymous access)</li>
+          <li>The scheduler can't generate credentials itself</li>
+          <li>It asks a <strong>Google-managed agent</strong> to create a temporary token</li>
+          <li>The agent needs explicit permission to do this</li>
+        </ul>
+      </div>
+      <div class="box red">
+        <h4>What happens if this is missing</h4>
+        <ul>
+          <li>The scheduler fires on time</li>
+          <li>The event reaches the target service</li>
+          <li>But authentication fails — <strong>silently</strong></li>
+          <li>No error in the scheduler logs</li>
+          <li>You only find out when you check the target service</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+sequenceDiagram
+  participant S as Scheduler
+  participant A as Google Agent
+  participant T as Target Service
+  S->>A: I need to call Target Service
+  A->>A: Do I have permission to create a token?
+  A->>S: Here's a temporary token (valid ~1hr)
+  S->>T: Request + token
+  T->>T: Verify token
+  T-->>S: Success
+      </pre>
+      <div class="analogy">Think of it as a receptionist (Google agent) who can issue visitor badges (tokens). The receptionist needs authorization to issue badges for specific floors (services).</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 8: Service Agents ==================== -->
+<section>
+  <h2>Lesson 3: Google's Agents Are Not Ready by Default</h2>
+  <p>When you enable a Google service (like event routing), Google creates a <strong>service agent</strong> to manage it. But it's not created immediately.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>The problem</h4>
+        <ul>
+          <li>You enable a service (e.g., "turn on event routing")</li>
+          <li>Google says "Done!" — but the agent isn't ready yet</li>
+          <li>Your automation tries to grant permissions to the agent</li>
+          <li>Fails because the agent doesn't exist yet</li>
+          <li>This is intermittent — sometimes it works, sometimes not</li>
+        </ul>
+      </div>
+      <div class="box green">
+        <h4>The fix</h4>
+        <ul>
+          <li>Explicitly activate each agent before granting permissions</li>
+          <li>We added a step that says: "Create the agent NOW, don't wait"</li>
+          <li>Then verify the agent exists before proceeding</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  E[Enable API] -->|"Google says done"| W{Agent exists?}
+  W -->|"Sometimes no\n(lazy creation)"| F[Permission grant FAILS]
+  W -->|"Sometimes yes"| S[Permission grant succeeds]
+  E2[Enable API] --> A[Explicitly activate agent]
+  A --> C{Agent exists?}
+  C -->|"Always yes"| S2[Permission grant succeeds]
+  style F fill:#fce8e6,stroke:#c5221f
+  style S fill:#e6f4ea,stroke:#188038
+  style S2 fill:#e6f4ea,stroke:#188038
+      </pre>
+      <div class="analogy">It's like hiring a new department — you can't give someone building access before HR finishes their onboarding. We make sure onboarding is complete before assigning access.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 9: Propagation ==================== -->
+<section>
+  <h2>Lesson 4: Permissions Take Time to Activate</h2>
+  <p>GCP permissions are <strong>eventually consistent</strong> — the system confirms a permission is granted, but it may not be active for up to 7 minutes.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>Common approach: Just wait</h4>
+        <ul>
+          <li>Add a 60-second delay after granting permissions</li>
+          <li>Wasteful if permission activates in 10 seconds</li>
+          <li>Unreliable if it takes 5 minutes</li>
+          <li>No way to know if it actually worked</li>
+        </ul>
+      </div>
+      <div class="box green">
+        <h4>Our approach: Verify, then proceed</h4>
+        <ul>
+          <li>After granting, we poll: "Can this account actually access the resource?"</li>
+          <li>Check every 10 seconds, up to 2 minutes</li>
+          <li>Proceed as soon as confirmed — no wasted time</li>
+          <li>If it fails after 2 minutes, we know something is wrong</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  G[Grant permission] --> V{Verify: can\naccount access\nresource?}
+  V -->|"Not yet"| W[Wait 10 seconds]
+  W --> V
+  V -->|"Yes!"| P[Proceed with deploy]
+  V -->|"2 min timeout"| E[Error: investigate]
+  style P fill:#e6f4ea,stroke:#188038
+  style E fill:#fce8e6,stroke:#c5221f
+      </pre>
+      <div class="analogy">Like waiting for a new employee's badge to activate — you don't just hope it works. You test the badge at the door before sending them to their desk.</div>
+      <p class="muted">This caught a real bug: a build account had permissions granted but couldn't access its build storage for 45 seconds.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 10: Event Chain ==================== -->
+<section>
+  <h2>Lesson 5: The Silent Failure Chain</h2>
+  <p>Our event-driven pipeline requires <strong>5 separate permission grants</strong>. If any one is missing, events are lost — with no error visible to the operator.</p>
+  <pre class="mermaid">
+flowchart LR
+  GCS[File uploaded\nto storage] -->|"1. Storage agent\ncan publish events"| PS[Event bus]
+  PS -->|"2. Event service\ncan receive events"| EA[Event router]
+  EA -->|"3. Invoker account\ncan call the service"| CR[Processing\nService]
+  EA -.->|"4. Invoker account\ncan receive events"| EA
+  PS -.->|"5. Event bus agent\ncan create auth tokens\nfor invoker account"| CR
+  style GCS fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8eaf0,stroke:#1a56db
+  </pre>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>What "silent failure" means</h4>
+        <ul>
+          <li>The file upload succeeds</li>
+          <li>The event fires correctly</li>
+          <li>The event reaches the target</li>
+          <li>But authentication fails (missing grant #5)</li>
+          <li><strong>No error in the event logs</strong> — only in the target service logs</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>Our fix</h4>
+        <ul>
+          <li>All 5 grants are declared in code</li>
+          <li>The event trigger won't be created until all 5 are confirmed</li>
+          <li>If any grant fails, deployment stops with a clear error</li>
+          <li>No partial deployments that look working but aren't</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 11: Destroy & Rebuild ==================== -->
+<section>
+  <h2>The Ultimate Test: Destroy and Rebuild</h2>
+  <p><em>"If you can't tear it all down and rebuild the exact same working system, your automation is incomplete."</em></p>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>What we can do</h4>
+        <ul>
+          <li>One command destroys all infrastructure</li>
+          <li>One command rebuilds everything from scratch</li>
+          <li>All accounts, permissions, services, triggers — recreated automatically</li>
+          <li>Under 10 minutes from zero to working pipeline</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h4>Why this matters for the business</h4>
+        <ul>
+          <li><strong>Disaster recovery:</strong> we can rebuild in any region</li>
+          <li><strong>Cost control:</strong> tear down expensive resources when not in use</li>
+          <li><strong>Compliance:</strong> every permission is in code and auditable</li>
+          <li><strong>Onboarding:</strong> new environments from the same blueprint</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  C[Code Repository\nblueprint] -->|"deploy command"| D[Full Infrastructure\naccounts + permissions +\nservices + triggers]
+  D -->|"destroy command"| E[Empty Project]
+  E -->|"deploy command"| D2[Exact Same Infrastructure\nidentical to original]
+  style C fill:#e8eaf0,stroke:#1a56db
+  style D fill:#e6f4ea,stroke:#188038
+  style E fill:#fce8e6,stroke:#c5221f
+  style D2 fill:#e6f4ea,stroke:#188038
+      </pre>
+      <table>
+        <tr><th>Action</th><th>Time</th><th>Method</th></tr>
+        <tr><td>Full deploy</td><td>&lt;10 min</td><td>Script or GitHub Actions</td></tr>
+        <tr><td>Full destroy</td><td>&lt;10 min</td><td>Script or GitHub Actions</td></tr>
+        <tr><td>Environment clone</td><td>&lt;10 min</td><td>Change one variable</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 12: Key Takeaways ==================== -->
+<section>
+  <h2>Key Takeaways</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow" style="padding:15px">
+        <h4>1. Separate accounts for separate jobs</h4>
+        <p style="font-size:0.8em">One master key for everything is a security risk. Each service gets its own account with minimum permissions. If one is compromised, the blast radius is limited.</p>
+      </div>
+      <div class="box yellow" style="padding:15px">
+        <h4>2. "Associate" and "Token Creator" are hidden requirements</h4>
+        <p style="font-size:0.8em">The deployer needs permission to assign accounts to services. Google agents need permission to create authentication tokens. Missing either causes silent failures.</p>
+      </div>
+      <div class="box yellow" style="padding:15px">
+        <h4>3. Google's agents aren't ready immediately</h4>
+        <p style="font-size:0.8em">Enabling a service doesn't mean its support infrastructure is ready. Explicit activation avoids intermittent failures.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box yellow" style="padding:15px">
+        <h4>4. Permissions are eventually consistent</h4>
+        <p style="font-size:0.8em">Granting a permission doesn't mean it's active. Verify before proceeding — don't assume. This makes CI/CD pipelines reliable instead of flaky.</p>
+      </div>
+      <div class="box yellow" style="padding:15px">
+        <h4>5. Infrastructure as Code proves itself on rebuild</h4>
+        <p style="font-size:0.8em">The real test: destroy everything and rebuild from code. If it works, your automation is complete. If not, there are hidden manual steps.</p>
+      </div>
+      <div class="box green" style="padding:15px">
+        <h4>Business impact</h4>
+        <p style="font-size:0.8em">Auditable permissions. Reproducible environments. Fast disaster recovery. No tribal knowledge locked in someone's head.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 13: Improvements ==================== -->
+<section>
+  <h2>Next Steps</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Eliminate long-lived credentials</h4>
+        <p style="font-size:0.8em">Currently: we download a key file for the deployer account. This key doesn't expire and audit logs don't show who used it.</p>
+        <p style="font-size:0.8em"><strong>Better:</strong> Workload Identity Federation — GitHub Actions authenticates directly with Google Cloud. No keys to manage, rotate, or accidentally leak. Audit logs show the exact person/workflow that triggered the action.</p>
+      </div>
+      <div class="box">
+        <h4>Remove over-provisioned permissions</h4>
+        <p style="font-size:0.8em">Our audit log experiment found that the deployer has a permission (<code>tokenCreator</code>) it doesn't actually need. Removing unnecessary permissions reduces attack surface.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box">
+        <h4>Reusable permission templates</h4>
+        <p style="font-size:0.8em">Package the "create account + assign permissions + associate with service" pattern into reusable modules. New services get correct permissions by default.</p>
+      </div>
+      <div class="box">
+        <h4>Organization-level policies</h4>
+        <p style="font-size:0.8em">Enforce rules like "no service account keys" and "no Editor role" at the organization level, so individual projects can't bypass security.</p>
+      </div>
+      <div class="box">
+        <h4>Automated permission auditing</h4>
+        <p style="font-size:0.8em">Alert when permissions are granted outside of Terraform. Ensures all changes go through code review.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 14: Q&A ==================== -->
+<section class="center">
+  <h1>Questions?</h1>
+  <p class="subtitle">IAM Lessons from Deploying GCP Infrastructure with Terraform</p>
+  <br>
+  <div class="box" style="max-width:700px;margin:0 auto">
+    <h4>Quick Answers</h4>
+    <ul>
+      <li><strong>"What does this cost?"</strong> — Under $5 for all testing. Production would be similar for this scale.</li>
+      <li><strong>"How long to rebuild?"</strong> — Under 10 minutes, fully automated, zero manual steps.</li>
+      <li><strong>"Can we use this for other projects?"</strong> — Yes, the patterns (3-layer IAM, audit verification, IaC) apply to any GCP project.</li>
+      <li><strong>"What about multi-cloud?"</strong> — Terraform supports AWS/Azure. The IAM patterns differ but the IaC approach is the same.</li>
+    </ul>
+  </div>
+</section>
+
+</div><!-- /slides -->
+</div><!-- /reveal -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: false, theme: 'neutral', flowchart: { curve: 'basis' } });
+
+  Reveal.initialize({
+    hash: true,
+    slideNumber: true,
+    plugins: [ RevealNotes, RevealHighlight ],
+    width: 1280,
+    height: 800,
+    margin: 0.02,
+    center: false,
+  }).then(() => {
+    document.querySelectorAll('.mermaid').forEach((el, i) => {
+      const code = el.textContent;
+      el.removeAttribute('data-processed');
+      mermaid.render(`mermaid-${i}`, code).then(({svg}) => {
+        el.innerHTML = svg;
+      });
+    });
+  });
+</script>
+</body>
+</html>
