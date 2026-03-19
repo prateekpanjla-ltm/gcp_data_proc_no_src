@@ -7,16 +7,17 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
   <style>
     :root { --r-heading-color: #1a56db; --r-link-color: #1a56db; }
-    .reveal { font-size: 22px; }
-    .reveal h1 { color: #1a56db; font-size: 1.6em; }
-    .reveal h2 { color: #1a56db; font-size: 1.3em; margin-bottom: 10px; }
+    .reveal { font-size: 20px; }
+    .reveal h1 { color: #1a56db; font-size: 1.4em; margin-bottom: 5px; }
+    .reveal h2 { color: #1a56db; font-size: 1.2em; margin-bottom: 5px; }
+    .reveal section { padding-top: 10px !important; }
     .reveal h3 { color: #188038; }
-    .reveal .subtitle { color: #666; font-size: 0.7em; margin-top: 0; }
+    .reveal .subtitle { color: #666; font-size: 0.65em; margin: 0 0 5px 0; }
     .reveal pre { font-size: 0.55em; box-shadow: none; margin: 5px 0; }
     .reveal pre code { max-height: 400px; padding: 10px; border-radius: 6px; }
     .reveal .columns { display: flex; gap: 15px; }
     .reveal .col { flex: 1; }
-    .reveal .box { background: #f0f2f8; border-radius: 6px; padding: 10px; margin: 5px 0; border-left: 4px solid #1a56db; }
+    .reveal .box { background: #f0f2f8; border-radius: 6px; padding: 8px; margin: 3px 0; border-left: 4px solid #1a56db; }
     .reveal .box.green { border-left-color: #188038; }
     .reveal .box.yellow { border-left-color: #b08200; }
     .reveal .box.red { border-left-color: #c5221f; }
@@ -34,8 +35,8 @@
     .reveal table { font-size: 0.65em; margin: 10px auto; }
     .reveal table th { background: #1a56db; color: white; padding: 8px 12px; }
     .reveal table td { padding: 6px 12px; border-bottom: 1px solid #ddd; }
-    .reveal .mermaid { font-size: 0.5em; max-height: 280px; overflow: hidden; cursor: grab; border: 1px solid #e0e0e0; border-radius: 6px; padding: 5px; position: relative; }
-    .reveal .mermaid svg { max-height: 280px; }
+    .reveal .mermaid { font-size: 0.65em; max-height: 380px; overflow: visible; cursor: grab; border: 1px solid #e0e0e0; border-radius: 6px; padding: 5px; position: relative; }
+    .reveal .mermaid svg { max-height: 380px; width: 100%; }
     .reveal .mermaid:active { cursor: grabbing; }
     .reveal .zoom-hint { position: absolute; bottom: 2px; right: 8px; font-size: 10px; color: #aaa; z-index: 10; }
     .reveal section { text-align: left; }
@@ -624,7 +625,8 @@ destroy-expensive.yml</code></pre>
     slideNumber: true,
     plugins: [ RevealNotes, RevealHighlight, RevealZoom ],
     width: 1280,
-    height: 720,
+    height: 800,
+    margin: 0.02,
   }).then(() => {
     // Render mermaid diagrams then enable pan+zoom
     document.querySelectorAll('.mermaid').forEach((el, i) => {
