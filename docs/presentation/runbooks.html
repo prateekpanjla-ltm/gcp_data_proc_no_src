@@ -152,7 +152,12 @@ terraform destroy -auto-approve \
       <div class="box green">
         <h4>Option A: Use the cleanup script (recommended)</h4>
       </div>
-      <pre><code class="language-bash"># Interactive script: finds stale SAs, prompts for each
+      <pre><code class="language-bash"># From Cloud Shell (already authenticated):
+git clone https://github.com/prateekpanjla-outlook/gcp_data_proc_ltm.git
+cd gcp_data_proc_ltm
+chmod +x infrastructure/scripts/cleanup-stale-sas.sh
+
+# Interactive: finds stale SAs, prompts for each
 ./infrastructure/scripts/cleanup-stale-sas.sh \
   beaming-glyph-489707-b8 7
 
