@@ -53,6 +53,20 @@ git push ltm gh_archive_test
 # Monitor at:
 # https://github.com/prateekpanjla-ltm/gcp_data_proc/actions</code></pre>
       <div class="box yellow">
+        <h4>Option A2: Trigger via dummy file change</h4>
+      </div>
+      <pre><code class="language-bash"># First time (create trigger file):
+echo "# Workflow trigger file" > src/.trigger
+git add src/.trigger
+git commit -m "Add workflow trigger file"
+git push origin gh_archive_test
+
+# Later (re-trigger deploy):
+date >> src/.trigger
+git add src/.trigger
+git commit -m "Trigger deploy"
+git push origin gh_archive_test</code></pre>
+      <div class="box">
         <h4>Option B: Manual trigger (no code change)</h4>
       </div>
       <pre><code class="language-bash"># Go to GitHub Actions UI:
