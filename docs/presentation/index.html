@@ -34,8 +34,10 @@
     .reveal table { font-size: 0.65em; margin: 10px auto; }
     .reveal table th { background: #1a56db; color: white; padding: 8px 12px; }
     .reveal table td { padding: 6px 12px; border-bottom: 1px solid #ddd; }
-    .reveal .mermaid { font-size: 0.5em; max-height: 250px; overflow: hidden; }
-    .reveal .mermaid svg { max-height: 250px; }
+    .reveal .mermaid { font-size: 0.5em; max-height: 280px; overflow: hidden; cursor: grab; border: 1px solid #e0e0e0; border-radius: 6px; padding: 5px; position: relative; }
+    .reveal .mermaid svg { max-height: 280px; }
+    .reveal .mermaid:active { cursor: grabbing; }
+    .reveal .zoom-hint { position: absolute; bottom: 2px; right: 8px; font-size: 10px; color: #aaa; z-index: 10; }
     .reveal section { text-align: left; }
     .reveal .center { text-align: center; }
     .reveal .small { font-size: 0.65em; }
@@ -612,6 +614,7 @@ destroy-expensive.yml</code></pre>
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/zoom/zoom.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 <script type="module">
   import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
   mermaid.initialize({ startOnLoad: false, theme: 'neutral', flowchart: { curve: 'basis' } });
@@ -623,12 +626,26 @@ destroy-expensive.yml</code></pre>
     width: 1280,
     height: 720,
   }).then(() => {
-    // Render mermaid diagrams after reveal loads
+    // Render mermaid diagrams then enable pan+zoom
     document.querySelectorAll('.mermaid').forEach((el, i) => {
       const code = el.textContent;
       el.removeAttribute('data-processed');
       mermaid.render(`mermaid-${i}`, code).then(({svg}) => {
-        el.innerHTML = svg;
+        el.innerHTML = svg + '<span class="zoom-hint">scroll to zoom, drag to pan</span>';
+        const svgEl = el.querySelector('svg');
+        if (svgEl) {
+          svgEl.style.width = '100%';
+          svgEl.style.height = '100%';
+          svgPanZoom(svgEl, {
+            zoomEnabled: true,
+            controlIconsEnabled: true,
+            fit: true,
+            center: true,
+            minZoom: 0.5,
+            maxZoom: 5,
+            zoomScaleSensitivity: 0.3,
+          });
+        }
       });
     });
   });
