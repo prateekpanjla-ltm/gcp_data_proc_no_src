@@ -782,30 +782,37 @@ flowchart LR
       </div>
     </div>
   </div>
-  <pre class="mermaid" style="min-height:350px">
-%%{init: {'theme':'base', 'themeVariables': {'fontSize':'18px'}, 'flowchart': {'nodeSpacing': 30, 'rankSpacing': 40}}}%%
+  <div class="columns">
+    <div class="col">
+      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 1: Scheduled Download</strong></p>
+      <pre class="mermaid">
 flowchart LR
-  subgraph P1["Phase 1: Scheduled Download"]
-    SCHED_AGENT["Scheduler Agent\nservice-NUM@gcp-sa-cloudscheduler"] -->|"mints OIDC token\n(tokenCreator)"| SCHED_SA["Scheduler SA"]
-    SCHED_SA -->|"auth call"| CRJ["Cloud Run Job"]
-  end
-  subgraph P2["Phase 2: Event-driven Processing"]
-    GCS["File in GCS"] --> STORAGE_AGENT["Storage Agent\nservice-NUM@gs-project-accounts"]
-    STORAGE_AGENT -->|"publish event\n(pubsub.publisher)"| PUBSUB["Pub/Sub"]
-    PUBSUB --> EVENTARC_AGENT["Eventarc Agent\nservice-NUM@gcp-sa-eventarc"]
-    EVENTARC_AGENT -->|"route event\n(eventReceiver)"| PUBSUB_AGENT["Pub/Sub Agent\nservice-NUM@gcp-sa-pubsub"]
-    PUBSUB_AGENT -->|"mint token\n(tokenCreator)"| INV["Invoker SA"]
-    INV -->|"auth call"| CRS["Cloud Run Svc"]
-  end
-  style SCHED_AGENT fill:#fce8e6,stroke:#c5221f
-  style STORAGE_AGENT fill:#fce8e6,stroke:#c5221f
-  style EVENTARC_AGENT fill:#fce8e6,stroke:#c5221f
-  style PUBSUB_AGENT fill:#fce8e6,stroke:#c5221f
-  style SCHED_SA fill:#e6f4ea,stroke:#188038
-  style INV fill:#e6f4ea,stroke:#188038
-  style CRJ fill:#e8f0fe,stroke:#1967d2
-  style CRS fill:#e8f0fe,stroke:#1967d2
-  </pre>
+  A["Scheduler\nAgent"] -->|"tokenCreator"| B["Scheduler\nSA"]
+  B -->|"OIDC token"| C["Cloud Run\nJob"]
+  style A fill:#fce8e6,stroke:#c5221f
+  style B fill:#e6f4ea,stroke:#188038
+  style C fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+    <div class="col">
+      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 2: Event-driven Processing</strong></p>
+      <pre class="mermaid">
+flowchart LR
+  G["GCS"] --> S["Storage\nAgent"]
+  S -->|"pubsub.publisher"| P["Pub/Sub"]
+  P --> E["Eventarc\nAgent"]
+  E -->|"eventReceiver"| PS["Pub/Sub\nAgent"]
+  PS -->|"tokenCreator"| I["Invoker\nSA"]
+  I -->|"OIDC token"| CR["Cloud Run\nSvc"]
+  style S fill:#fce8e6,stroke:#c5221f
+  style E fill:#fce8e6,stroke:#c5221f
+  style PS fill:#fce8e6,stroke:#c5221f
+  style I fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+  </div>
+  <p style="font-size:0.65em; text-align:center"><span style="color:#c5221f">&#9632;</span> Service Agents (Google-managed) &nbsp;&nbsp; <span style="color:#188038">&#9632;</span> Service Accounts (we create) &nbsp;&nbsp; <span style="color:#1967d2">&#9632;</span> Compute Resources</p>
 </section>
 
 <!-- ==================== SLIDE 10c: Service Agents NOT Auto-Created ==================== -->
