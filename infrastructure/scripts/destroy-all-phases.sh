@@ -262,6 +262,55 @@ tf_destroy "${PHASE1_DIR}" \
   -var="deployer_sa_key_path=${KEY_PATH}" || true
 
 # =============================================================================
+# Cleanup Orphaned IAM Bindings
+# =============================================================================
+# After destroying SAs, GCP leaves "deleted:serviceAccount:..." entries in the
+# project IAM policy. These orphans can conflict with redeployment when Terraform
+# recreates SAs with the same email but a new UID.
+echo ""
+echo "========================================="
+echo "Cleaning orphaned IAM bindings..."
+echo "========================================="
+
+ORPHANS=$(gcloud projects get-iam-policy "$PROJECT_ID" --format=json 2>/dev/null \
+  | grep -o '"deleted:serviceAccount:[^"]*"' | sort -u || true)
+
+if [ -n "$ORPHANS" ]; then
+  ORPHAN_COUNT=$(echo "$ORPHANS" | wc -l)
+  echo "Found $ORPHAN_COUNT orphaned binding(s). Removing..."
+
+  # Get current policy, strip deleted members, re-apply
+  POLICY_FILE="/tmp/iam-policy-cleanup-$$.json"
+  gcloud projects get-iam-policy "$PROJECT_ID" --format=json > "$POLICY_FILE" 2>/dev/null
+
+  # Remove all "deleted:serviceAccount:..." members from bindings
+  python3 -c "
+import json, re, sys
+with open('$POLICY_FILE') as f:
+    policy = json.load(f)
+removed = 0
+for binding in policy.get('bindings', []):
+    before = len(binding.get('members', []))
+    binding['members'] = [m for m in binding.get('members', []) if not m.startswith('deleted:')]
+    removed += before - len(binding['members'])
+# Remove empty bindings
+policy['bindings'] = [b for b in policy.get('bindings', []) if b.get('members')]
+with open('$POLICY_FILE', 'w') as f:
+    json.dump(policy, f, indent=2)
+print(f'Removed {removed} orphaned member reference(s)')
+" 2>/dev/null || echo "python3 not available, skipping cleanup"
+
+  if [ -f "$POLICY_FILE" ]; then
+    gcloud projects set-iam-policy "$PROJECT_ID" "$POLICY_FILE" --quiet 2>/dev/null \
+      && echo "Orphaned IAM bindings cleaned." \
+      || echo "WARNING: Failed to update IAM policy. Clean manually."
+    rm -f "$POLICY_FILE"
+  fi
+else
+  echo "No orphaned IAM bindings found."
+fi
+
+# =============================================================================
 # Summary
 # =============================================================================
 DESTROY_END=$(date +%s)
