@@ -1,3 +1,4 @@
+# Destroy workflow for test pipeline resources
 name: Destroy Test Pipeline
 
 on:

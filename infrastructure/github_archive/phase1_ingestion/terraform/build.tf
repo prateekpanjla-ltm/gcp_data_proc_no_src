@@ -1,7 +1,10 @@
 # Wait for IAM permissions to propagate before submitting Cloud Build.
 # GCP IAM is eventually consistent — the policy may be recorded but not yet
-# enforced. We poll the testIamPermissions API on the Cloud Build source bucket
-# to confirm the build SA can actually read/write objects.
+# enforced. Three checks run in sequence:
+#   1. Can deployer impersonate Cloud Build SA? (tokenCreator)
+#   2. Does Cloud Build SA have cloudbuild.builds.create? (Policy Troubleshooter)
+#   3. Does Cloud Build SA have storage.objects.create on build bucket? (Policy Troubleshooter)
+# All three must pass before gcloud builds submit runs.
 resource "null_resource" "wait_for_iam_propagation" {
   depends_on = [
     google_project_iam_member.cloudbuild_sa_roles
@@ -14,23 +17,74 @@ resource "null_resource" "wait_for_iam_propagation" {
   provisioner "local-exec" {
     command     = <<-SCRIPT
       SA="${google_service_account.cloudbuild_sa.email}"
+      PROJECT="${var.project_id}"
       BUCKET="${var.project_id}_cloudbuild"
-      MAX_ATTEMPTS=12
+      MAX_ATTEMPTS=18
+
+      check_passed() {
+        local check_name="$1"
+        local result="$2"
+        if echo "$result" | grep -q "GRANTED"; then
+          echo "  $check_name: GRANTED"
+          return 0
+        else
+          echo "  $check_name: NOT YET"
+          return 1
+        fi
+      }
+
       for i in $(seq 1 $MAX_ATTEMPTS); do
-        echo "Checking IAM propagation (attempt $i/$MAX_ATTEMPTS)..."
+        echo "=== IAM propagation check (attempt $i/$MAX_ATTEMPTS) ==="
+        ALL_PASSED=true
+
+        # Check 1: Can deployer impersonate Cloud Build SA? (tokenCreator)
         TOKEN=$(gcloud auth print-access-token --impersonate-service-account="$SA" 2>/dev/null)
         if [ -n "$TOKEN" ]; then
-          RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" \
-            "https://storage.googleapis.com/storage/v1/b/$BUCKET/iam/testPermissions?permissions=storage.objects.get&permissions=storage.objects.create")
-          if echo "$RESPONSE" | grep -q "storage.objects.get"; then
-            echo "IAM permissions confirmed."
-            exit 0
-          fi
+          echo "  Check 1 (impersonate Cloud Build SA): GRANTED"
+        else
+          echo "  Check 1 (impersonate Cloud Build SA): NOT YET"
+          ALL_PASSED=false
         fi
-        echo "  Not yet propagated, waiting 10s..."
+
+        # Check 2: Does Cloud Build SA have cloudbuild.builds.create?
+        if [ "$ALL_PASSED" = true ]; then
+          RESULT2=$(gcloud policy-troubleshoot iam \
+            "//cloudresourcemanager.googleapis.com/projects/$PROJECT" \
+            --principal-email="$SA" \
+            --permission="cloudbuild.builds.create" \
+            --format="value(access)" 2>/dev/null)
+          check_passed "Check 2 (cloudbuild.builds.create)" "$RESULT2" || ALL_PASSED=false
+        fi
+
+        # Check 3: Does Cloud Build SA have storage.objects.create?
+        if [ "$ALL_PASSED" = true ]; then
+          RESULT3=$(gcloud policy-troubleshoot iam \
+            "//storage.googleapis.com/projects/_/buckets/$BUCKET" \
+            --principal-email="$SA" \
+            --permission="storage.objects.create" \
+            --format="value(access)" 2>/dev/null)
+          check_passed "Check 3 (storage.objects.create)" "$RESULT3" || ALL_PASSED=false
+        fi
+
+        # Check 4: Does Cloud Build SA have storage.objects.get?
+        if [ "$ALL_PASSED" = true ]; then
+          RESULT4=$(gcloud policy-troubleshoot iam \
+            "//storage.googleapis.com/projects/_/buckets/$BUCKET" \
+            --principal-email="$SA" \
+            --permission="storage.objects.get" \
+            --format="value(access)" 2>/dev/null)
+          check_passed "Check 4 (storage.objects.get)" "$RESULT4" || ALL_PASSED=false
+        fi
+
+        if [ "$ALL_PASSED" = true ]; then
+          echo "=== All IAM checks passed ==="
+          exit 0
+        fi
+
+        echo "  Waiting 10s..."
         sleep 10
       done
-      echo "ERROR: IAM propagation timed out after 120s"
+      echo "ERROR: IAM propagation timed out after $((MAX_ATTEMPTS * 10))s"
       exit 1
     SCRIPT
     interpreter = ["bash", "-c"]

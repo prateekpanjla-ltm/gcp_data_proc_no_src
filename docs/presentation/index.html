@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>IAM Lessons from Deploying GCP Infrastructure with Terraform</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
+  <style>
+    :root { --r-heading-color: #1a56db; --r-link-color: #1a56db; }
+    .reveal { font-size: 20px; }
+    .reveal h1 { color: #1a56db; font-size: 1.4em; margin-bottom: 5px; }
+    .reveal h2 { color: #1a56db; font-size: 1.2em; margin-bottom: 5px; }
+    .reveal section { padding-top: 10px !important; text-align: left; }
+    .reveal h3 { color: #188038; }
+    .reveal .subtitle { color: #666; font-size: 0.65em; margin: 0 0 5px 0; }
+    .reveal pre { font-size: 0.55em; box-shadow: none; margin: 5px 0; }
+    .reveal pre code { max-height: 400px; padding: 10px; border-radius: 6px; }
+    .reveal .columns { display: flex; gap: 15px; }
+    .reveal .col { flex: 1; }
+    .reveal .box { background: #f0f2f8; border-radius: 6px; padding: 10px; margin: 4px 0; border-left: 4px solid #1a56db; }
+    .reveal .box.green { border-left-color: #188038; }
+    .reveal .box.yellow { border-left-color: #b08200; }
+    .reveal .box.red { border-left-color: #c5221f; }
+    .reveal .box h4 { margin: 0 0 5px 0; font-size: 0.8em; }
+    .reveal .box ul { margin: 0; font-size: 0.7em; }
+    .reveal .box li { margin: 2px 0; }
+    .reveal .highlight { color: #c5221f; font-weight: bold; }
+    .reveal .accent { color: #1a56db; font-weight: bold; }
+    .reveal .muted { color: #888; font-size: 0.7em; }
+    .reveal .tag { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.65em; font-weight: bold; }
+    .reveal .tag.blue { background: #e8eaf0; color: #1a56db; }
+    .reveal .tag.green { background: #e6f4ea; color: #188038; }
+    .reveal .tag.red { background: #fce8e6; color: #c5221f; }
+    .reveal .tag.yellow { background: #fef7e0; color: #b08200; }
+    .reveal table { font-size: 0.65em; margin: 10px auto; }
+    .reveal table th { background: #1a56db; color: white; padding: 8px 12px; }
+    .reveal table td { padding: 6px 12px; border-bottom: 1px solid #ddd; }
+    .reveal .mermaid { font-size: 0.75em; }
+    .reveal .mermaid svg { max-height: 600px; }
+    .reveal .center { text-align: center; }
+    .reveal .small { font-size: 0.65em; }
+    .slide-number { font-size: 14px !important; }
+    /* Architecture map bar */
+    .arch-map { display: flex; gap: 3px; font-size: 0.5em; margin-bottom: 6px; padding: 4px 0; border-bottom: 1px solid #e0e0e0; }
+    .arch-map .node { padding: 3px 6px; border-radius: 3px; background: #e8eaf0; color: #666; text-align: center; white-space: nowrap; }
+    .arch-map .node.active { background: #1a56db; color: white; font-weight: bold; }
+    .arch-map .arrow { color: #ccc; padding: 0 2px; align-self: center; }
+    .arch-map .arrow.active { color: #1a56db; }
+    .arch-map .group { display: flex; gap: 3px; align-items: center; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 4px; }
+    .arch-map .group.active { border-color: #1a56db; background: #f0f4ff; }
+    .arch-map .label { font-size: 0.8em; color: #999; margin-right: 4px; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ==================== SLIDE 1: Title ==================== -->
+<section class="center">
+  <h1 style="font-size:1.6em">IAM Lessons from Deploying<br>GCP Infrastructure with Terraform</h1>
+  <p class="subtitle">Service Accounts &nbsp;|&nbsp; Service Agents &nbsp;|&nbsp; Least Privilege &nbsp;|&nbsp; Infrastructure as Code</p>
+  <br>
+  <p>Prateek Panjla</p>
+</section>
+
+<!-- ==================== SLIDE 2: What I Built ==================== -->
+<section data-focus="all">
+  <h2>What I Built</h2>
+  <p><strong>An automated data pipeline that downloads public GitHub event data every hour, processes and flattens the JSON, and loads it into BigQuery for analysis — fully deployed and destroyed by code.</strong></p>
+  <div class="columns">
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  GH[GitHub Archive\nhourly JSON.gz] --> P1
+  P1[Phase 1: Cloud Run Job\nDownload file to GCS] -->|Eventarc\nfile landed| P2
+  P2[Phase 2: Cloud Run Service\nParse + flatten JSON] -->|Eventarc\nstaged file| P3
+  P3[Phase 3: Cloud Function\nLoad to BigQuery] --> BQ[(BigQuery)]
+  P4[Phase 4: Cloud Monitoring\nDashboards + Alerts] -.-> P1 & P2 & P3
+  style P1 fill:#e8eaf0,stroke:#1a56db
+  style P2 fill:#e8eaf0,stroke:#1a56db
+  style P3 fill:#e8eaf0,stroke:#1a56db
+  style P4 fill:#fef7e0,stroke:#b08200
+  style BQ fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>Key Numbers</h4>
+        <ul>
+          <li>4 pipeline phases, 11 Google product instances</li>
+          <li>6 dedicated service accounts (SA = Service Account)</li>
+          <li>26 IAM roles on deployer SA</li>
+          <li>3 Google service agents configured</li>
+          <li>Destroy + reprovision in &lt;10 min</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h4>GCP Products Used</h4>
+        <ul style="columns:2; font-size:0.7em">
+          <li>Cloud Run (Jobs + Services)</li>
+          <li>Cloud Functions</li>
+          <li>Cloud Build</li>
+          <li>Eventarc</li>
+          <li>Cloud Scheduler</li>
+          <li>Cloud Storage (GCS)</li>
+          <li>BigQuery</li>
+          <li>Artifact Registry</li>
+          <li>Cloud Monitoring</li>
+          <li>Cloud Logging</li>
+          <li>IAM &amp; Admin</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3: Why Terraform + IAM Issues ==================== -->
+<section data-focus="terraform">
+  <h2>Why Terraform?</h2>
+  <div class="columns">
+    <div class="col">
+      <ul>
+        <li>Every resource and permission is a line of code in Git</li>
+        <li>One command deploys, one command destroys</li>
+        <li>Environment parameterization: dev/test/prod from same code</li>
+        <li><code>terraform plan</code> shows exactly what will change before applying</li>
+        <li>The real test: <code>terraform destroy && terraform apply</code> — does it still work?</li>
+      </ul>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4>IAM Issues Discovered While Using Terraform</h4>
+        <ul>
+          <li><strong>actAs (associate)</strong> — deployer needs permission to assign SAs to resources</li>
+          <li><strong>tokenCreator</strong> — service agents need permission to mint auth tokens</li>
+          <li><strong>Service agents not auto-created</strong> — must be explicitly activated</li>
+          <li><strong>IAM propagation delay</strong> — permissions granted but not yet enforced (up to 7 min)</li>
+          <li><strong>Orphaned IAM bindings</strong> — deleted SAs leave broken references in IAM policy</li>
+          <li><strong>Silent failures</strong> — Eventarc chain: 5 bindings, miss one = no error in logs</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3b: How Terraform Works ==================== -->
+<section data-focus="terraform">
+  <h2>How Terraform Works</h2>
+  <p>Terraform reads <code>.tf</code> files, builds a <strong>dependency graph</strong> (like an AST), determines the order of operations, and applies changes to match the desired state.</p>
+  <div class="columns">
+    <div class="col">
+      <pre class="mermaid" style="min-height:500px">
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'22px'}, 'flowchart': {'nodeSpacing': 45, 'rankSpacing': 60}}}%%
+flowchart TD
+  TF[".tf files\n(HCL code)"] -->|"1. Parse"| AST["Dependency Graph\n(resource DAG)"]
+  AST -->|"2. Plan"| PLAN["Execution Plan\nwhat to create/update/destroy"]
+  PLAN -->|"3. Apply"| GCP["GCP APIs\ncreate resources in order"]
+  GCP -->|"4. Store"| STATE["State File\n(terraform.tfstate)\ntracks what exists"]
+  STATE -.->|"next run: compare"| TF
+  style AST fill:#fef7e0,stroke:#b08200
+  style STATE fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <div class="box">
+        <h4>The Dependency Graph</h4>
+        <ul>
+          <li>Terraform reads all <code>.tf</code> files and builds a <strong>directed acyclic graph (DAG)</strong></li>
+          <li>Each resource is a node; references between resources create edges</li>
+          <li>Terraform walks the graph in topological order — creating dependencies first</li>
+          <li>Resources with no dependencies are created <strong>in parallel</strong></li>
+        </ul>
+      </div>
+      <div class="box yellow">
+        <h4>State File</h4>
+        <ul>
+          <li>After apply, Terraform records what it created in a state file</li>
+          <li>Next run: compares desired state (.tf files) vs actual state (state file)</li>
+          <li>Only applies the <strong>difference</strong> — not everything from scratch</li>
+          <li>We store state in a <strong>GCS bucket</strong> — single source of truth, prevents conflicts when multiple people or CI/CD pipelines run Terraform</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3c: Explicit vs Implicit depends_on ==================== -->
+<section data-focus="terraform">
+  <h2>Terraform Dependencies: Implicit vs Explicit</h2>
+  <p>Terraform automatically detects dependencies from resource references. But sometimes you need to force ordering manually.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Implicit (automatic)</h4>
+        <p style="font-size:0.75em">When one resource references another, Terraform knows the order automatically.</p>
+      </div>
+      <pre style="font-size:0.65em;text-align:left;background:#f8f9fa;padding:0.8em;border-radius:8px;border:1px solid #ddd"><span style="color:#888"># Terraform sees: Cloud Run references SA</span>
+<span style="color:#888"># → creates SA first, then Cloud Run</span>
+resource "<span style="background:#e6f4ea;padding:0 4px;border-radius:3px;font-weight:bold">google_service_account</span>" "<span style="background:#e6f4ea;padding:0 4px;border-radius:3px;font-weight:bold">processor</span>" {
+  account_id = "test-processor"
+}
+
+resource "<span style="background:#e8f0fe;padding:0 4px;border-radius:3px;font-weight:bold">google_cloud_run_v2_service</span>" "<span style="background:#e8f0fe;padding:0 4px;border-radius:3px;font-weight:bold">svc</span>" {
+  <span style="color:#888"># This reference creates an implicit dependency:</span>
+  service_account = <span style="background:#fce8e6;padding:0 4px;border-radius:3px;font-weight:bold;text-decoration:underline">google_service_account.processor.email</span>
+  <span style="color:#888"># ^^^ Terraform sees this ─────────────┘</span>
+  <span style="color:#888">#     and builds the dependency edge</span>
+}</pre>
+      <div style="font-size:0.6em;display:flex;gap:1em;margin-top:0.3em">
+        <span><span style="background:#e6f4ea;padding:1px 6px;border-radius:3px">■</span> Created 1st</span>
+        <span><span style="background:#e8f0fe;padding:1px 6px;border-radius:3px">■</span> Created 2nd</span>
+        <span><span style="background:#fce8e6;padding:1px 6px;border-radius:3px;text-decoration:underline">■</span> The reference</span>
+      </div>
+      <pre class="mermaid">
+flowchart LR
+  SA1[Service Account] -->|"referenced by"| CR1[Cloud Run]
+  style SA1 fill:#e6f4ea,stroke:#188038
+  style CR1 fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4>Explicit (manual — <code>depends_on</code>)</h4>
+        <p style="font-size:0.75em">When there's no direct reference but ordering still matters — like IAM needing time to propagate.</p>
+      </div>
+      <pre style="font-size:0.65em;text-align:left;background:#f8f9fa;padding:0.8em;border-radius:8px;border:1px solid #ddd"><span style="color:#888"># No reference between these resources,</span>
+<span style="color:#888"># but Cloud Run NEEDS the image to exist first</span>
+resource "null_resource" "build_image" {
+  provisioner "local-exec" {
+    command = "gcloud builds submit ..."
+  }
+}
+
+resource "google_cloud_run_v2_service" "svc" {
+  image = "us-central1-docker.pkg.dev/.../latest"
+  <span style="color:#888"># Terraform can't see the connection — force it:</span>
+  depends_on = [null_resource.build_image]
+}</pre>
+      <pre class="mermaid">
+flowchart LR
+  IAM[IAM Grant] -->|"depends_on"| WAIT[null_resource\nwait]
+  WAIT -->|"depends_on"| BUILD[null_resource\nbuild image]
+  BUILD -->|"depends_on"| CR2[Cloud Run]
+  style BUILD fill:#fef7e0,stroke:#b08200
+  style WAIT fill:#fce8e6,stroke:#c5221f
+  style CR2 fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3d: null_resource and data sources ==================== -->
+<section data-focus="terraform">
+  <h2>Terraform Escape Hatches: null_resource & data</h2>
+  <p>When Terraform can't do something natively, these two constructs fill the gap.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4><code>null_resource</code> + <code>local-exec</code></h4>
+        <p style="font-size:0.75em">Runs arbitrary shell commands during <code>terraform apply</code>. We use it for things Terraform can't do natively.</p>
+      </div>
+      <pre style="font-size:0.75em"><code class="language-hcl"># Use case 1: Activate service agents
+resource "null_resource" "init_agents" {
+  provisioner "local-exec" {
+    command = "gcloud beta services identity create ..."
+  }
+}
+
+# Use case 2: Build container images
+resource "null_resource" "build_image" {
+  triggers = { hash = filesha256("Dockerfile") }
+  provisioner "local-exec" {
+    command = "gcloud builds submit ..."
+  }
+}
+
+# Use case 3: Wait for IAM propagation
+resource "null_resource" "wait_iam" {
+  provisioner "local-exec" {
+    command = "# poll until permission is active"
+  }
+}</code></pre>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4><code>data</code> sources</h4>
+        <p style="font-size:0.75em">Read-only lookups — fetch information from GCP without creating anything. Used to get project numbers, existing resources, etc.</p>
+      </div>
+      <pre style="font-size:0.75em"><code class="language-hcl"># Look up project number (needed for service agents)
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+# Use it to reference service agents:
+resource "google_service_account_iam_member" "token" {
+  member = "serviceAccount:service-${
+    data.google_project.current.number
+  }@gcp-sa-cloudscheduler.iam..."
+}
+
+# Look up remote Terraform state from another phase:
+data "terraform_remote_state" "phase1" {
+  backend = "gcs"
+  config  = { bucket = "...", prefix = "phase1" }
+}
+# Use: data.terraform_remote_state.phase1.outputs.sa_email</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 3e: Terraform Dependency Graph (AST) ==================== -->
+<section data-focus="terraform">
+  <h2>Terraform Dependency Graph: Our Actual Pipeline</h2>
+  <p class="subtitle">Terraform builds this graph from our <code>.tf</code> files. Same color = same execution level (created in parallel).</p>
+  <div class="columns">
+    <div class="col" style="flex:0.4">
+      <pre style="font-size:0.825em;text-align:left;background:#f8f9fa;padding:0.6em;border-radius:8px;border:1px solid #ddd;line-height:1.4"><span style="color:#888"># Phase 1 Terraform (simplified)</span>
+
+<span style="background:#e8f0fe;padding:1px 4px;border-radius:3px">resource "google_project_service" "apis" { }</span>
+
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">resource "google_service_account" "deployer" {</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">  depends_on = [google_project_service.apis]</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">}</span>
+
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">resource "google_service_account" "cloud_build" {</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">  depends_on = [google_project_service.apis]</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">}</span>
+
+<span style="background:#fce8e6;padding:1px 4px;border-radius:3px">resource "google_project_iam_member" "build_roles" {</span>
+<span style="background:#fce8e6;padding:1px 4px;border-radius:3px">  member = google_service_account.cloud_build.email</span>
+<span style="background:#fce8e6;padding:1px 4px;border-radius:3px">}</span>
+
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">resource "null_resource" "wait_iam" {</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">  depends_on = [google_project_iam_member.build_roles]</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">}</span>
+
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">resource "null_resource" "build_image" {</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">  depends_on = [null_resource.wait_iam]</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">}</span>
+
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">resource "google_cloud_run_v2_job" "downloader" {</span>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">  service_account = google_service_account.deployer.email</span>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">  depends_on = [null_resource.build_image]</span>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">}</span></pre>
+    </div>
+    <div class="col" style="flex:1">
+      <pre class="mermaid" style="min-height:700px">
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'24px'}, 'flowchart': {'nodeSpacing': 45, 'rankSpacing': 60}}}%%
+flowchart TD
+  subgraph L1["Level 1 — Enable APIs"]
+    APIS["google_project_service\napis"]
+  end
+  subgraph L2["Level 2 — Create Identities"]
+    SA_DL["service_account\ndownloader"]
+    SA_CB["service_account\ncloud_build"]
+    BUCKET["storage_bucket\nraw + staging"]
+  end
+  subgraph L3["Level 3 — Grant Permissions"]
+    IAM_DL["iam_member\ndownloader roles"]
+    IAM_CB["iam_member\ncloud_build roles"]
+    AGENT["null_resource\ninit service agents"]
+  end
+  subgraph L4["Level 4 — Verify & Build"]
+    WAIT["null_resource\nwait for IAM"]
+    BUILD["null_resource\nbuild container"]
+  end
+  subgraph L5["Level 5 — Deploy"]
+    JOB["cloud_run_v2_job\ndownloader"]
+  end
+
+  APIS --> SA_DL & SA_CB & BUCKET
+  SA_DL --> IAM_DL
+  SA_CB --> IAM_CB
+  APIS --> AGENT
+  IAM_CB --> WAIT
+  WAIT --> BUILD
+  BUILD --> JOB
+  IAM_DL --> JOB
+  SA_DL --> JOB
+
+  style APIS fill:#e8f0fe,stroke:#1967d2,color:#000
+  style SA_DL fill:#fef7e0,stroke:#b08200,color:#000
+  style SA_CB fill:#fef7e0,stroke:#b08200,color:#000
+  style BUCKET fill:#fef7e0,stroke:#b08200,color:#000
+  style IAM_DL fill:#fce8e6,stroke:#c5221f,color:#000
+  style IAM_CB fill:#fce8e6,stroke:#c5221f,color:#000
+  style AGENT fill:#fce8e6,stroke:#c5221f,color:#000
+  style WAIT fill:#e6f4ea,stroke:#188038,color:#000
+  style BUILD fill:#e6f4ea,stroke:#188038,color:#000
+  style JOB fill:#f3e8fd,stroke:#7627bb,color:#000
+
+  style L1 fill:transparent,stroke:#1967d2,stroke-width:2px,color:#1967d2
+  style L2 fill:transparent,stroke:#b08200,stroke-width:2px,color:#b08200
+  style L3 fill:transparent,stroke:#c5221f,stroke-width:2px,color:#c5221f
+  style L4 fill:transparent,stroke:#188038,stroke-width:2px,color:#188038
+  style L5 fill:transparent,stroke:#7627bb,stroke-width:2px,color:#7627bb
+      </pre>
+    </div>
+  </div>
+  <div style="display:flex;gap:1.5em;justify-content:center;font-size:0.7em;margin-top:0.3em">
+    <span style="color:#1967d2">■ Level 1: APIs</span>
+    <span style="color:#b08200">■ Level 2: Identities + Buckets</span>
+    <span style="color:#c5221f">■ Level 3: IAM Grants</span>
+    <span style="color:#188038">■ Level 4: Verify + Build</span>
+    <span style="color:#7627bb">■ Level 5: Deploy</span>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 4: Three Stage Terraform ==================== -->
+<section data-focus="sa">
+  <h2>Three Stages of Terraform IAM</h2>
+  <p class="subtitle">SA = Service Account — an identity used by code instead of humans</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4><span class="tag yellow">Stage 1</span> Deployer SA</h4>
+        <ul>
+          <li>"Who runs terraform apply?"</li>
+          <li>test-tf-deployer@project.iam</li>
+          <li>26 project-level roles</li>
+          <li>Must "associate" (actAs) every runtime SA</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4><span class="tag green">Stage 2</span> Runtime SAs</h4>
+        <ul>
+          <li>"Who does the actual work?"</li>
+          <li>downloader — storage, logging</li>
+          <li>processor — storage, monitoring</li>
+          <li>bq-loader — bigquery, storage</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4><span class="tag red">Stage 3</span> Service Agents</h4>
+        <ul>
+          <li>"Who does Google's infra work?"</li>
+          <li>Scheduler agent — tokenCreator</li>
+          <li>Storage agent — pubsub.publisher</li>
+          <li>Pub/Sub agent — tokenCreator</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <p class="center"><span class="tag yellow">Key insight:</span> Most tutorials show one SA with Editor role. Production needs these three stages.</p>
+  <div class="columns">
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  D["Deployer SA\ntest-tf-deployer@project"] -->|"associate\n(actAs)"| DL["Downloader SA\ntest-github-archive-downloader@project"]
+  D -->|"associate"| PR["Processor SA\ntest-github-archive-processor@project"]
+  D -->|"associate"| CB["Cloud Build SA\ntest-cloud-build@project"]
+  DL --> CRJ[Cloud Run Job]
+  PR --> CRS[Cloud Run Service]
+  style D fill:#fef7e0,stroke:#b08200
+  style DL fill:#e6f4ea,stroke:#188038
+  style PR fill:#e6f4ea,stroke:#188038
+  style CB fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  SA1["Scheduler Agent\nservice-PROJECT_NUM@gcp-sa-cloudscheduler.iam"] -->|"tokenCreator"| SCH["Scheduler SA\ntest-scheduler@project"]
+  SA2["Pub/Sub Agent\nservice-PROJECT_NUM@gcp-sa-pubsub.iam"] -->|"tokenCreator"| INV["Invoker SA\ntest-eventarc-invoker@project"]
+  SCH -->|"OIDC\ntoken"| CR1[Cloud Run Job]
+  INV -->|"OIDC\ntoken"| CR2[Cloud Run Service]
+  style SA1 fill:#fce8e6,stroke:#c5221f
+  style SA2 fill:#fce8e6,stroke:#c5221f
+  style SCH fill:#e6f4ea,stroke:#188038
+  style INV fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 5: actAs (Associate) ==================== -->
+<section data-focus="actas">
+  <h2>The "actAs" Permission <span class="muted">(a.k.a. Associate SA)</span></h2>
+  <p><span class="tag yellow">Naming confusion:</span> Google calls it "impersonation" — it's also <strong>"associating a SA with a resource"</strong></p>
+  <div class="columns">
+    <div class="col">
+      <pre><code class="language-bash"># Error without association:
+PERMISSION_DENIED: Caller does not have
+permission to act as service account
+'downloader@project.iam...'
+
+# Fix:
+gcloud iam service-accounts \
+  add-iam-policy-binding "$TARGET_SA" \
+  --member="serviceAccount:$DEPLOYER" \
+  --role="roles/iam.serviceAccountUser"</code></pre>
+    </div>
+    <div class="col">
+      <div class="box yellow">
+        <h4>Why the name is confusing</h4>
+        <ul>
+          <li>Google calls it "impersonation" — you're <em>associating</em></li>
+          <li>"serviceAccountUser" = associate SA with a resource</li>
+          <li>Docs page titled: "Attach service accounts to resources"</li>
+          <li>Creating SA needs <code>iam.serviceAccountAdmin</code></li>
+          <li>Associating SA needs <code>iam.serviceAccountUser</code></li>
+          <li>Creating != associating — different permission!</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <pre class="mermaid">
+flowchart LR
+  TF[Terraform Deployer SA] -->|"1. CREATE SA\niam.serviceAccountAdmin"| SA[Processor SA\nnewly created]
+  TF -->|"2. ASSOCIATE SA\niam.serviceAccountUser\n(actAs)"| CR[Cloud Run Service\nservice_account = processor-sa]
+  SA -.->|"attached to"| CR
+  TF -.->|"Without actAs:\nCREATE succeeds\nASSOCIATE fails ❌"| CR
+  style TF fill:#fef7e0,stroke:#b08200
+  style SA fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8eaf0,stroke:#1a56db
+  </pre>
+</section>
+
+<!-- ==================== SLIDE 6: Associate in Practice ==================== -->
+<section data-focus="cloudbuild">
+  <h2>Associate in Practice: Who Deploys?</h2>
+  <p class="subtitle">Two valid approaches. We chose Approach A. Audit logs prove only actAs is checked.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Approach A: Terraform Deploys <span class="tag green">What we use</span></h4>
+        <ul>
+          <li>Cloud Build: build + push image ONLY</li>
+          <li>Terraform: creates Cloud Run with runtime SA</li>
+          <li>Associate needed: <strong>Deployer SA only</strong></li>
+          <li>Deployer needs <code>actAs</code> on Cloud Build SA (to submit build)</li>
+          <li>Deployer needs <code>actAs</code> on runtime SAs (to attach to Cloud Run)</li>
+        </ul>
+      </div>
+      <pre class="mermaid">
+flowchart LR
+  D1[Deployer SA] -->|"actAs on build-sa\ngcloud builds submit"| CB1[Cloud Build SA\nbuilds image only]
+  D1 -->|"actAs on processor-sa\nterraform apply"| CR1[Cloud Run\nservice_account=processor-sa]
+  style D1 fill:#fef7e0,stroke:#b08200
+  style CB1 fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <div class="box yellow">
+        <h4>Approach B: Cloud Build Deploys <span class="tag yellow">Alternative</span></h4>
+        <ul>
+          <li>Cloud Build: build + push + <code>gcloud run deploy</code></li>
+          <li>Deployer needs <code>actAs</code> on Cloud Build SA (to submit build)</li>
+          <li>Cloud Build SA needs <code>actAs</code> on runtime SA (to attach to Cloud Run)</li>
+          <li>Two hops of associate — broader permissions needed</li>
+        </ul>
+      </div>
+      <pre class="mermaid">
+flowchart LR
+  D2[Deployer SA] -->|"actAs on build-sa"| CB2[Cloud Build SA]
+  CB2 -->|"actAs on processor-sa\ngcloud run deploy"| CR2[Cloud Run]
+  style D2 fill:#fef7e0,stroke:#b08200
+  style CB2 fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 6c: Why tokenCreator? (explainer) ==================== -->
+<section data-focus="agents">
+  <h2>Why Do We Need tokenCreator?</h2>
+  <p class="subtitle">Cloud Run rejects unauthenticated HTTP requests. Every trigger must present a valid OIDC token.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>The Problem</h4>
+        <ol style="font-size:0.75em">
+          <li>Cloud Scheduler fires on a cron schedule</li>
+          <li>It needs to call our Cloud Run Job via HTTPS</li>
+          <li>Cloud Run requires an <strong>OIDC identity token</strong> in the request header</li>
+          <li>Scheduler doesn't have its own credentials — it relies on a <strong>service agent</strong> to mint the token</li>
+          <li>The service agent can only mint a token <strong>for a specific SA</strong> if it has <code>tokenCreator</code> permission on that SA</li>
+        </ol>
+      </div>
+      <div class="box red">
+        <h4>What happens without it?</h4>
+        <p style="font-size:0.75em">Scheduler fires → agent tries to mint token → <strong>PERMISSION_DENIED</strong> → Cloud Run never receives the request. No error in Cloud Run logs because the request never arrives. You only see the failure in Scheduler logs.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>The Fix in Terraform</h4>
+        <pre><code class="language-hcl"># Grant Scheduler service agent
+# tokenCreator on Scheduler SA
+resource "google_service_account_iam_member" "sched" {
+  service_account_id = google_service_account
+                        .scheduler.name
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:service-${
+    local.project_number
+  }@gcp-sa-cloudscheduler.iam..."
+}
+
+# Same pattern for Pub/Sub agent
+# (needed for Eventarc triggers)
+resource "google_service_account_iam_member" "pubsub" {
+  service_account_id = google_service_account
+                        .eventarc_invoker.name
+  role    = "roles/iam.serviceAccountTokenCreator"
+  member  = "serviceAccount:service-${
+    local.project_number
+  }@gcp-sa-pubsub.iam..."
+}</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 7: tokenCreator ==================== -->
+<section data-focus="agents">
+  <h2>tokenCreator: The Authentication Chain</h2>
+  <p class="subtitle">This involves <strong>Google-managed Service Agents</strong> (not our Service Accounts). Service agents handle infrastructure plumbing — routing events, minting tokens — and need explicit permission grants.</p>
+  <div class="columns">
+    <div class="col" style="flex:1.2">
+      <div class="box yellow">
+        <h4>The Problem</h4>
+        <ul>
+          <li>Cloud Scheduler needs to call Cloud Run via HTTP</li>
+          <li>Cloud Run requires authentication (OIDC token)</li>
+          <li>Scheduler can't mint tokens — it delegates to its <strong>service agent</strong></li>
+          <li>The <strong>Scheduler service agent</strong> (Google-managed) needs <code>tokenCreator</code> ON the scheduler SA to mint the token</li>
+        </ul>
+      </div>
+      <div class="box red">
+        <h4>Same pattern for Eventarc (Pub/Sub service agent)</h4>
+        <ul>
+          <li>GCS event → <strong>Pub/Sub service agent</strong> delivers to Cloud Run</li>
+          <li>Pub/Sub agent needs <code>tokenCreator</code> ON invoker SA</li>
+          <li>Without it: event delivered, Cloud Run returns <strong>403 silently</strong></li>
+        </ul>
+      </div>
+      <pre><code class="language-hcl"># Terraform: grant tokenCreator to SERVICE AGENT
+resource "google_service_account_iam_member" "token" {
+  service_account_id = google_service_account.scheduler.name
+  role         = "roles/iam.serviceAccountTokenCreator"
+  # member is the SERVICE AGENT, not our SA:
+  member       = "serviceAccount:service-NUM@gcp-sa-cloudscheduler..."
+}</code></pre>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+sequenceDiagram
+  participant CS as Cloud Scheduler
+  participant CSA as Scheduler Service Agent
+  participant SA as Scheduler SA
+  participant CR as Cloud Run Job
+  CS->>CSA: I need to call Cloud Run
+  CSA->>CSA: Do I have tokenCreator?
+  CSA->>SA: Generate OIDC token
+  SA-->>CS: OIDC token
+  CS->>CR: HTTP + OIDC token
+  CR->>CR: Validate token
+  CR-->>CS: 200 OK
+      </pre>
+    </div>
+  </div>
+  <p><span class="tag red">Key:</span> actAs = associate SA with resource (deploy time) | tokenCreator = service agent mints auth tokens (runtime)</p>
+</section>
+
+<!-- ==================== SLIDE 9: IAM Propagation ==================== -->
+<section data-focus="cloudbuild">
+  <h2>IAM Propagation: Eventually Consistent</h2>
+  <p class="subtitle">IAM says "granted" but the permission isn't enforced yet (~60s typical, up to 7 min)</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>Naive: sleep 60</h4>
+        <pre><code class="language-hcl">provisioner "local-exec" {
+  command = "sleep 60"
+}</code></pre>
+        <p class="small">Wasteful (usually 10-20s). Unreliable (sometimes 7 min). No verification.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>Better: Poll + Policy Troubleshooter</h4>
+        <pre><code class="language-bash">for i in $(seq 1 18); do
+  # Check 1: tokenCreator propagated?
+  # Check 2: cloudbuild.builds.create?
+  # Check 3: storage.objects.create?
+  # Check 4: storage.objects.get?
+  gcloud policy-troubleshoot iam \
+    "//cloudresourcemanager.../projects/$P"\
+    --principal-email="$SA" \
+    --permission="cloudbuild.builds.create"
+  # If all GRANTED -> proceed
+  sleep 10
+done</code></pre>
+      </div>
+    </div>
+  </div>
+  <pre class="mermaid">
+sequenceDiagram
+  participant TF as Terraform
+  participant IAM as GCP IAM
+  participant PT as Policy Troubleshooter
+  participant CB as Cloud Build
+  TF->>IAM: Grant roles to Cloud Build SA
+  IAM-->>TF: OK (recorded, not yet enforced)
+  loop Every 10s, up to 180s
+    TF->>PT: Check 1: tokenCreator propagated?
+    TF->>PT: Check 2: cloudbuild.builds.create?
+    TF->>PT: Check 3: storage.objects.create?
+    TF->>PT: Check 4: storage.objects.get?
+    PT-->>TF: NOT YET / GRANTED
+  end
+  TF->>CB: gcloud builds submit (all 4 GRANTED)
+  </pre>
+</section>
+
+<!-- ==================== SLIDE 10: Eventarc Chain ==================== -->
+<section data-focus="eventarc">
+  <h2>The Eventarc Chain: 5 Bindings, All Required</h2>
+  <p><span class="highlight">Miss one binding and it fails silently.</span> This chain is used in <strong>Phase 2</strong> (GCS → processor) and <strong>Phase 3</strong> (GCS → BQ loader). Three service agents involved: Storage, Eventarc, and Pub/Sub.</p>
+  <pre class="mermaid">
+flowchart LR
+  GCS[GCS\nfile upload] -->|"1. Storage agent\npubsub.publisher"| PS[Pub/Sub]
+  PS -->|"2. Eventarc agent\neventReceiver"| EA[Eventarc]
+  EA -->|"3. Invoker SA\nrun.invoker ON service"| CR[Cloud Run\nService]
+  EA -.->|"4. Invoker SA\neventarc.eventReceiver"| EA
+  PS -.->|"5. Pub/Sub agent\ntokenCreator ON invoker SA"| INV[Invoker SA]
+  INV -->|OIDC token| CR
+  style GCS fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8eaf0,stroke:#1a56db
+  </pre>
+  <div class="columns">
+    <div class="col">
+      <div class="box">
+        <h4>What "silent failure" means</h4>
+        <ul>
+          <li>File uploads to GCS — succeeds</li>
+          <li>Event fires via Eventarc — succeeds</li>
+          <li>Event reaches Cloud Run — succeeds</li>
+          <li>But auth fails (missing binding #5) — <strong>no error in Eventarc logs</strong></li>
+          <li>Only visible in Cloud Run logs as 403</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>Service agents in this chain</h4>
+        <ul>
+          <li><code>service-NUM@gs-project-accounts</code> — Storage agent (#1)</li>
+          <li><code>service-NUM@gcp-sa-eventarc</code> — Eventarc agent (#2)</li>
+          <li><code>service-NUM@gcp-sa-pubsub</code> — Pub/Sub agent (#5)</li>
+          <li>All must be activated + granted permissions explicitly</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 10b: Why Service Agents? ==================== -->
+<section data-focus="agents">
+  <h2>Service Agents: The Invisible Plumbing</h2>
+  <p class="subtitle">Service agents are <strong>Google-managed identities</strong> that handle infrastructure work behind the scenes. You don't create them — Google does. But you <strong>must</strong> grant them IAM permissions.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>Why do we need them?</h4>
+        <ul style="font-size:0.7em">
+          <li>When Cloud Scheduler calls Cloud Run, <strong>someone</strong> needs to mint the OIDC auth token</li>
+          <li>When a file lands in GCS, <strong>someone</strong> needs to publish the event to Pub/Sub for Eventarc</li>
+          <li>When Eventarc delivers an event, <strong>someone</strong> needs to authenticate the HTTP call to Cloud Run</li>
+          <li>Your code doesn't do this — <strong>service agents</strong> do</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box red">
+        <h4>The catch with Eventarc</h4>
+        <p style="font-size:0.7em">Eventarc requires <strong>explicit activation</strong> of both the Storage and Eventarc service agents via <code>gcloud beta services identity create</code>. Without this, the agents don't exist and IAM grants fail silently.</p>
+      </div>
+    </div>
+  </div>
+  <div class="columns">
+    <div class="col">
+      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 1: Scheduled Download</strong></p>
+      <pre class="mermaid">
+flowchart LR
+  A["Scheduler\nAgent"] -->|"tokenCreator"| B["Scheduler\nSA"]
+  B -->|"OIDC token"| C["Cloud Run\nJob"]
+  style A fill:#fce8e6,stroke:#c5221f
+  style B fill:#e6f4ea,stroke:#188038
+  style C fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+    <div class="col">
+      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 2: Event-driven Processing</strong></p>
+      <pre class="mermaid">
+flowchart LR
+  G["GCS"] --> S["Storage\nAgent"]
+  S -->|"pubsub.publisher"| P["Pub/Sub"]
+  P --> E["Eventarc\nAgent"]
+  E -->|"eventReceiver"| PS["Pub/Sub\nAgent"]
+  PS -->|"tokenCreator"| I["Invoker\nSA"]
+  I -->|"OIDC token"| CR["Cloud Run\nSvc"]
+  style S fill:#fce8e6,stroke:#c5221f
+  style E fill:#fce8e6,stroke:#c5221f
+  style PS fill:#fce8e6,stroke:#c5221f
+  style I fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+  </div>
+  <p style="font-size:0.65em; text-align:center"><span style="color:#c5221f">&#9632;</span> Service Agents (Google-managed) &nbsp;&nbsp; <span style="color:#188038">&#9632;</span> Service Accounts (we create) &nbsp;&nbsp; <span style="color:#1967d2">&#9632;</span> Compute Resources</p>
+</section>
+
+<!-- ==================== SLIDE 10c: Service Agents NOT Auto-Created ==================== -->
+<section data-focus="agents">
+  <h2>Service Agents Are NOT Auto-Created</h2>
+  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists. We use service agents in <strong>Phase 1</strong> (Scheduler agent → Cloud Run Job), <strong>Phase 2</strong> (Storage + Eventarc + Pub/Sub agents → Cloud Run Service), and <strong>Phase 3</strong> (same agents → Cloud Function).</p>
+  <div class="columns">
+    <div class="col">
+      <pre><code class="language-hcl"># You'd expect this to work:
+resource "google_project_service" "eventarc" {
+  service = "eventarc.googleapis.com"
+}
+resource "google_project_iam_member" "..." {
+  member = "serviceAccount:
+    service-NUM@gcp-sa-eventarc..."
+  depends_on = [...eventarc]
+}
+# FAILS: SA does not exist!</code></pre>
+    </div>
+    <div class="col">
+      <pre><code class="language-hcl"># Fix: Explicitly activate agents
+resource "null_resource" "init_agents" {
+  depends_on = [google_project_service.eventarc]
+  provisioner "local-exec" {
+    command = <<-SCRIPT
+      gcloud beta services identity create \
+        --service=storage.googleapis.com
+      gcloud beta services identity create \
+        --service=eventarc.googleapis.com
+    SCRIPT
+  }
+}</code></pre>
+    </div>
+  </div>
+  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then use Terraform's <code>depends_on</code> (which controls resource creation order) to wait for this activation step before attempting to grant permissions to the agent.</p>
+  <p><span class="tag yellow">Note:</span> Terraform's <code>depends_on</code> only ensures ordering — it waits for the API resource to report "enabled", NOT for the service agent to actually exist. That's why the explicit activation step is needed.</p>
+</section>
+
+<!-- ==================== SLIDE 11: Destroy & Reprovision ==================== -->
+<section data-focus="all">
+  <h2>Destroy & Reprovision</h2>
+  <p><em>"The real test of IaC: can you tear it all down and rebuild the exact same working system?"</em></p>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Scripts</h4>
+        <pre><code>./deploy.sh PROJECT_ID test
+./deploy.sh PROJECT_ID test --run
+./destroy.sh PROJECT_ID test
+./setup-terraform-deployer.sh</code></pre>
+      </div>
+      <div class="box">
+        <h4>GitHub Actions Workflows</h4>
+        <pre><code>deploy.yml           # push triggers deploy
+destroy.yml          # manual with confirmation</code></pre>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box yellow">
+        <h4>11 Google product instances destroyed & recreated</h4>
+        <ul>
+          <li>1 Cloud Run Job + 2 Cloud Run Services</li>
+          <li>1 Cloud Function (2nd gen)</li>
+          <li>1 Cloud Build (container images)</li>
+          <li>2 Eventarc triggers</li>
+          <li>1 Cloud Scheduler job</li>
+          <li>3 GCS buckets + 1 BigQuery dataset</li>
+          <li>1 Artifact Registry repo</li>
+          <li>6 Service Accounts + all IAM bindings</li>
+          <li>3 Service Agent activations</li>
+          <li>Orphaned IAM bindings auto-cleaned on destroy</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 12: Orphaned IAM Bindings ==================== -->
+<section data-focus="iam">
+  <h2>Orphaned IAM Bindings After Destroy</h2>
+  <p>When Terraform destroys SAs, GCP renames them to <code>deleted:serviceAccount:email?uid=...</code> but <strong>IAM bindings referencing them remain</strong> in the project policy.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>The problem</h4>
+        <ul>
+          <li>After <code>terraform destroy</code>, deleted SAs leave orphaned references</li>
+          <li>On redeploy, Terraform creates SA with same email but new UID</li>
+          <li>Old orphaned bindings can conflict with new ones</li>
+          <li>We found 20+ orphaned entries in our project after destroy</li>
+        </ul>
+      </div>
+      <pre><code class="language-bash"># Check for orphaned bindings:
+gcloud projects get-iam-policy PROJECT \
+  --format=json | grep "deleted:serviceAccount:"
+
+# Example output:
+"deleted:serviceAccount:test-cloud-build@
+  project.iam...?uid=113536875676481232802"</code></pre>
+    </div>
+    <div class="col">
+      <div class="box green">
+        <h4>The fix (automated in destroy script)</h4>
+        <ul>
+          <li>Added as final step in <code>destroy-all-phases.sh</code></li>
+          <li>Fetches project IAM policy as JSON</li>
+          <li>Strips all <code>deleted:serviceAccount:...</code> members</li>
+          <li>Re-applies cleaned policy</li>
+          <li>Runs automatically on every destroy</li>
+        </ul>
+      </div>
+      <pre class="mermaid">
+flowchart LR
+  D[terraform destroy] --> O[Orphaned bindings\ndeleted:serviceAccount:...]
+  O --> C[Cleanup script\nstrips deleted members]
+  C --> P[Clean IAM policy\nready for redeploy]
+  style O fill:#fce8e6,stroke:#c5221f
+  style P fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 13: Key Takeaways ==================== -->
+<section>
+  <h2>Key Takeaways</h2>
+  <ol>
+    <li><span class="accent">Least privilege needs 3 stages</span> — Deployer, Runtime SAs, Service Agents</li>
+    <li><span class="accent">actAs (associate) and tokenCreator are hidden requirements</span> — missing one = silent failure</li>
+    <li><span class="accent">Service agents are lazy</span> — <code>gcloud beta services identity create</code> before granting IAM</li>
+    <li><span class="accent">IAM is eventually consistent</span> — poll with Policy Troubleshooter, don't sleep</li>
+    <li><span class="accent">IaC proves itself on destroy + reprovision</span> — can't rebuild? not automated</li>
+  </ol>
+</section>
+
+<!-- ==================== SLIDE 13: AI-Assisted Development ==================== -->
+<section>
+  <h2>AI-Assisted Development</h2>
+  <p class="subtitle">Used Gemini Code Assist throughout the project</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box">
+        <h4>Infrastructure Diagrams</h4>
+        <ul><li>Generated architecture diagrams</li><li>Mermaid + draw.io formats</li><li>Iterated on layout and clarity</li></ul>
+      </div>
+      <div class="box green">
+        <h4>Phase 4: Monitoring</h4>
+        <ul><li>Dashboard JSON for Cloud Monitoring</li><li>Alert policies and SLO definitions</li><li>Suggested metrics to track</li></ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box yellow">
+        <h4>Code Review</h4>
+        <ul><li>Reviewed Terraform for security</li><li>Suggested least-privilege roles</li><li>Caught overly broad IAM bindings</li></ul>
+      </div>
+      <div class="box red">
+        <h4>This Presentation</h4>
+        <ul><li>Slide content and structure generated with AI</li><li>reveal.js + Mermaid diagrams auto-generated</li><li>Hosted on GitHub Pages from code repo</li></ul>
+      </div>
+    </div>
+  </div>
+  <p class="center" style="margin-top:10px"><strong>AI as a force multiplier — not a replacement for understanding</strong></p>
+</section>
+
+<!-- ==================== SLIDE 14: Improvements ==================== -->
+<section>
+  <h2>Improvements in Current Project</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box green" style="padding:12px">
+        <h4>Workload Identity Federation</h4>
+        <ul>
+          <li>Current: SA key on disk — <span class="highlight">audit logs don't show who used the key</span></li>
+          <li>Better: WIF (OIDC) — logs show caller, no long-lived keys</li>
+          <li>GitHub Actions authenticates directly with GCP via OIDC tokens</li>
+        </ul>
+      </div>
+      <div class="box" style="padding:12px">
+        <h4>IAM Propagation Checks</h4>
+        <ul>
+          <li>Current: impersonation-based check (needs tokenCreator)</li>
+          <li>Better: Policy Troubleshooter checks exact permissions needed</li>
+          <li>Check actAs before Cloud Build, not tokenCreator</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box yellow" style="padding:12px">
+        <h4>Hardcoded Values</h4>
+        <ul>
+          <li>Project number hardcoded — use <code>data.google_project</code></li>
+          <li>Was commented out due to API propagation delay</li>
+          <li>Fix: add explicit <code>depends_on</code> for API enablement</li>
+        </ul>
+      </div>
+      <div class="box red" style="padding:12px">
+        <h4>Over-Provisioned Roles</h4>
+        <ul>
+          <li><code>tokenCreator</code> on deployer — needed for propagation check but not for builds</li>
+          <li>Cloud Build SA has <code>run.admin</code> + <code>actAs</code> for unused CI/CD path</li>
+          <li>Proved via audit log experiment: only actAs checked for builds</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 15: References ==================== -->
+<section>
+  <h2>References</h2>
+  <ul class="small">
+    <li><strong>actAs (Attach SA):</strong> cloud.google.com/iam/docs/service-accounts-actas</li>
+    <li><strong>SA Authentication Roles:</strong> cloud.google.com/iam/docs/service-account-permissions</li>
+    <li><strong>SA Impersonation:</strong> cloud.google.com/iam/docs/service-account-impersonation</li>
+    <li><strong>Attach SA to Resources:</strong> cloud.google.com/iam/docs/attach-service-accounts</li>
+    <li><strong>Service Agents:</strong> cloud.google.com/iam/docs/service-agents</li>
+    <li><strong>Cloud Run IAM:</strong> cloud.google.com/run/docs/reference/iam/roles</li>
+    <li><strong>Eventarc Auth:</strong> cloud.google.com/eventarc/docs/access-control</li>
+    <li><strong>Terraform GCP Provider:</strong> registry.terraform.io/providers/hashicorp/google/latest/docs</li>
+  </ul>
+</section>
+
+<!-- ==================== SLIDE 16: Q&A ==================== -->
+<section class="center">
+  <h1>Questions?</h1>
+  <p class="subtitle">IAM Lessons from Deploying GCP Infrastructure with Terraform</p>
+  <br>
+  <div class="box" style="max-width:700px;margin:0 auto">
+    <h4>Prepared Answers</h4>
+    <ul>
+      <li>"Why not Editor role?" — 3000+ perms, can't manage IAM, audit nightmare</li>
+      <li>"Hardest bug?" — Eventarc 5-binding chain, silent auth failure</li>
+      <li>"Cost?" — Under $5 total (Cloud Run free tier, ephemeral clusters)</li>
+      <li>"Reprovision time?" — Under 10 minutes, fully automated</li>
+    </ul>
+  </div>
+</section>
+
+</div><!-- /slides -->
+</div><!-- /reveal -->
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/zoom/zoom.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: false, theme: 'neutral', flowchart: { curve: 'basis' } });
+
+  Reveal.initialize({
+    hash: true,
+    slideNumber: true,
+    plugins: [ RevealNotes, RevealHighlight, RevealZoom ],
+    width: 1280,
+    height: 800,
+    margin: 0.02,
+    center: false,
+  }).then(() => {
+    // Inject architecture map into slides with data-focus
+    const nodes = [
+      { id: 'terraform', label: 'Terraform', groups: ['terraform','all'] },
+      { id: 'deployer', label: 'Deployer SA', groups: ['sa','actas','cloudbuild','terraform','all'] },
+      { id: 'cloudbuild', label: 'Cloud Build', groups: ['cloudbuild','all'] },
+      { id: 'ar', label: 'Artifact Registry', groups: ['cloudbuild','all'] },
+      { id: 'crjob', label: 'Cloud Run Job', groups: ['actas','all'] },
+      { id: 'gcs1', label: 'GCS Landing', groups: ['eventarc','all'] },
+      { id: 'eventarc1', label: 'Eventarc', groups: ['eventarc','agents','all'] },
+      { id: 'crsvc', label: 'Cloud Run Svc', groups: ['actas','eventarc','all'] },
+      { id: 'gcs2', label: 'GCS Staging', groups: ['eventarc','all'] },
+      { id: 'eventarc2', label: 'Eventarc', groups: ['eventarc','agents','all'] },
+      { id: 'cfn', label: 'Cloud Function', groups: ['eventarc','all'] },
+      { id: 'bq', label: 'BigQuery', groups: ['all'] },
+      { id: 'iam', label: 'IAM Bindings', groups: ['sa','actas','agents','iam','all'] },
+      { id: 'agents', label: 'Service Agents', groups: ['agents','all'] },
+    ];
+    document.querySelectorAll('section[data-focus]').forEach(slide => {
+      const focus = slide.getAttribute('data-focus');
+      const map = document.createElement('div');
+      map.className = 'arch-map';
+      nodes.forEach((n, i) => {
+        if (i > 0 && n.id !== 'iam' && n.id !== 'agents') {
+          const arrow = document.createElement('span');
+          arrow.className = 'arrow' + (n.groups.includes(focus) ? ' active' : '');
+          arrow.textContent = '→';
+          map.appendChild(arrow);
+        }
+        if (n.id === 'iam' || n.id === 'agents') {
+          const sep = document.createElement('span');
+          sep.className = 'arrow';
+          sep.textContent = '|';
+          map.appendChild(sep);
+        }
+        const node = document.createElement('span');
+        node.className = 'node' + (n.groups.includes(focus) ? ' active' : '');
+        node.textContent = n.label;
+        map.appendChild(node);
+      });
+      slide.insertBefore(map, slide.firstChild);
+    });
+
+    document.querySelectorAll('.mermaid').forEach((el, i) => {
+      const code = el.textContent;
+      el.removeAttribute('data-processed');
+      mermaid.render(`mermaid-${i}`, code).then(({svg}) => {
+        el.innerHTML = svg;
+      });
+    });
+  });
+</script>
+</body>
+</html>

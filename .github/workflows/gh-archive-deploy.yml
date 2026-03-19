@@ -9,6 +9,7 @@ on:
       - '**.md'
       - 'learnings/**'
       - 'design/**'
+      - 'docs/**'
       - 'tmp_*'
 
 # Only one deploy can run at a time — prevents terraform state lock conflicts

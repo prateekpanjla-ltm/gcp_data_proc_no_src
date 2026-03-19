@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Runbooks — GCP Data Pipeline</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
+  <style>
+    :root { --r-heading-color: #1a56db; }
+    .reveal { font-size: 20px; }
+    .reveal h1 { color: #1a56db; font-size: 1.4em; }
+    .reveal h2 { color: #1a56db; font-size: 1.2em; margin-bottom: 5px; }
+    .reveal section { padding-top: 10px !important; text-align: left; }
+    .reveal pre { font-size: 0.6em; box-shadow: none; margin: 5px 0; }
+    .reveal pre code { padding: 12px; border-radius: 6px; max-height: 500px; }
+    .reveal .box { background: #f0f2f8; border-radius: 6px; padding: 10px; margin: 5px 0; border-left: 4px solid #1a56db; }
+    .reveal .box.green { border-left-color: #188038; }
+    .reveal .box.yellow { border-left-color: #b08200; }
+    .reveal .box.red { border-left-color: #c5221f; }
+    .reveal .box h4 { margin: 0 0 5px 0; font-size: 0.85em; }
+    .reveal .box ul { margin: 0; font-size: 0.75em; }
+    .reveal .box li { margin: 3px 0; }
+    .reveal .columns { display: flex; gap: 15px; }
+    .reveal .col { flex: 1; }
+    .reveal .muted { color: #888; font-size: 0.7em; }
+    .reveal .highlight { color: #c5221f; font-weight: bold; }
+    .reveal .tag { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 0.65em; font-weight: bold; background: #e8eaf0; color: #1a56db; }
+    .reveal .center { text-align: center; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- ==================== TITLE ==================== -->
+<section class="center">
+  <h1>Runbooks</h1>
+  <p>GCP Data Pipeline — Corporate Laptop Operations</p>
+  <p class="muted">Project: beaming-glyph-489707-b8 | Region: us-central1</p>
+</section>
+
+<!-- ==================== RUNBOOK 1: Deploy ==================== -->
+<section>
+  <h2>Runbook 1: Push & Trigger Build</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Option A: Push triggers auto-deploy</h4>
+      </div>
+      <pre><code class="language-bash"># Push to ltm remote — triggers deploy workflow
+git push ltm gh_archive_test
+
+# Monitor at:
+# https://github.com/prateekpanjla-ltm/gcp_data_proc/actions</code></pre>
+      <div class="box yellow">
+        <h4>Option A2: Trigger via dummy file change</h4>
+      </div>
+      <pre><code class="language-bash"># First time (create trigger file):
+echo "# Workflow trigger file" > src/.trigger
+git add src/.trigger
+git commit -m "Add workflow trigger file"
+git push origin gh_archive_test
+
+# Later (re-trigger deploy):
+date >> src/.trigger
+git add src/.trigger
+git commit -m "Trigger deploy"
+git push origin gh_archive_test</code></pre>
+      <div class="box">
+        <h4>Option B: Manual trigger (no code change)</h4>
+      </div>
+      <pre><code class="language-bash"># Go to GitHub Actions UI:
+# https://github.com/prateekpanjla-ltm/gcp_data_proc/
+#   actions/workflows/gh-archive-deploy.yml
+# Click "Run workflow" → branch: gh_archive_test</code></pre>
+    </div>
+    <div class="col">
+      <div class="box">
+        <h4>Required Secrets (already configured)</h4>
+        <ul>
+          <li><code>GCP_PROJECT_ID</code> = beaming-glyph-489707-b8</li>
+          <li><code>GCP_SA_KEY_BASE64</code> = base64 deployer key</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h4>To update the key secret</h4>
+      </div>
+      <pre><code class="language-bash"># Encode key file to base64:
+base64 -w 0 infrastructure/test-terraform-deployer-key.json
+
+# Paste output into:
+# GitHub → Settings → Secrets → GCP_SA_KEY_BASE64</code></pre>
+      <div class="box">
+        <h4>Paths that DON'T trigger build</h4>
+        <ul>
+          <li><code>**.md</code>, <code>learnings/**</code>, <code>design/**</code>, <code>docs/**</code></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== RUNBOOK 2: Destroy ==================== -->
+<section>
+  <h2>Runbook 2: Destroy Infrastructure</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>Option A: GitHub Actions (has confirmation prompt)</h4>
+      </div>
+      <pre><code class="language-bash"># Go to:
+# https://github.com/prateekpanjla-ltm/gcp_data_proc/
+#   actions/workflows/gh-archive-destroy.yml
+#
+# Click "Run workflow":
+#   environment: test
+#   confirmation: "destroy"  (must type exactly)</code></pre>
+      <div class="box yellow">
+        <h4>Option B: Direct from laptop</h4>
+      </div>
+      <pre><code class="language-bash"># Authenticate as deployer
+gcloud auth activate-service-account \
+  --key-file=infrastructure/test-terraform-deployer-key.json
+
+# Destroy phase by phase (reverse order):
+cd infrastructure/github_archive/phase4_monitoring/terraform/layers/03_operational
+terraform destroy -auto-approve \
+  -var="project_id=beaming-glyph-489707-b8" \
+  -var="environment=test" \
+  -var="region=us-central1"
+
+# Repeat for phase3, phase2, phase1...</code></pre>
+    </div>
+    <div class="col">
+      <div class="box">
+        <h4>What gets destroyed</h4>
+        <ul>
+          <li>Cloud Run Jobs + Services</li>
+          <li>Cloud Functions</li>
+          <li>Eventarc triggers</li>
+          <li>Cloud Scheduler jobs</li>
+          <li>GCS buckets (force_destroy = true)</li>
+          <li>BigQuery datasets</li>
+          <li>Artifact Registry repos</li>
+          <li>Service accounts + IAM bindings</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h4>What survives destroy</h4>
+        <ul>
+          <li>Terraform deployer SA (created outside TF)</li>
+          <li>Deployer key file (local disk)</li>
+          <li>Terraform state bucket</li>
+          <li>API enablements (disable_on_destroy = false)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== RUNBOOK 3: Clean Orphaned IAM Bindings ==================== -->
+<section>
+  <h2>Runbook 3: Clean Orphaned IAM Bindings</h2>
+  <p class="subtitle">After destroy, GCP leaves "deleted:serviceAccount:..." entries in the IAM policy. These can block redeployment.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box red">
+        <h4>The problem</h4>
+        <ul>
+          <li>Terraform destroys SAs during <code>terraform destroy</code></li>
+          <li>GCP renames them to <code>deleted:serviceAccount:email?uid=...</code></li>
+          <li>IAM bindings pointing to deleted SAs remain in project policy</li>
+          <li>On redeploy, Terraform creates SA with same email but new UID</li>
+          <li>Old orphaned bindings can conflict with new ones</li>
+        </ul>
+      </div>
+      <div class="box green">
+        <h4>Automated fix (runs with destroy script)</h4>
+        <p style="font-size:0.8em"><code>destroy-all-phases.sh</code> now cleans orphaned bindings automatically as a final step.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="box yellow">
+        <h4>Manual check & cleanup (Cloud Shell)</h4>
+      </div>
+      <pre><code class="language-bash"># Check for orphaned bindings:
+gcloud projects get-iam-policy \
+  beaming-glyph-489707-b8 --format=json \
+  | grep "deleted:serviceAccount:"
+
+# Clean all orphaned bindings:
+P="beaming-glyph-489707-b8"
+gcloud projects get-iam-policy $P --format=json \
+  > /tmp/policy.json
+
+python3 -c "
+import json
+with open('/tmp/policy.json') as f:
+    p = json.load(f)
+for b in p.get('bindings', []):
+    b['members'] = [m for m in b['members']
+      if not m.startswith('deleted:')]
+p['bindings'] = [b for b in p['bindings']
+  if b.get('members')]
+with open('/tmp/policy.json', 'w') as f:
+    json.dump(p, f, indent=2)
+print('Cleaned')
+"
+
+gcloud projects set-iam-policy $P \
+  /tmp/policy.json --quiet</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== RUNBOOK 4: Dashboard ==================== -->
+<section>
+  <h2>Runbook 4: View Dashboard While Screen Sharing</h2>
+  <div class="columns">
+    <div class="col">
+      <div class="box green">
+        <h4>Option A: Cloud Console (corporate-friendly)</h4>
+      </div>
+      <pre><code class="language-bash"># Cloud Monitoring dashboards
+# (console.cloud.google.com is usually whitelisted)
+https://console.cloud.google.com/monitoring/dashboards\
+  ?project=beaming-glyph-489707-b8
+
+# Cloud Run metrics
+https://console.cloud.google.com/run/detail/\
+  us-central1/test-github-archive-dashboard/metrics\
+  ?project=beaming-glyph-489707-b8</code></pre>
+      <div class="box yellow">
+        <h4>Option B: gcloud proxy (if Cloud Run URLs blocked)</h4>
+      </div>
+      <pre><code class="language-bash"># Tunnels through gcloud HTTPS (usually not blocked)
+gcloud run services proxy \
+  test-github-archive-dashboard \
+  --region=us-central1 \
+  --project=beaming-glyph-489707-b8 \
+  --port=8080
+
+# Open http://localhost:8080 in browser</code></pre>
+    </div>
+    <div class="col">
+      <div class="box">
+        <h4>Option C: Get direct URL (if not blocked)</h4>
+      </div>
+      <pre><code class="language-bash"># Dashboard is public (allUsers has run.invoker)
+gcloud run services describe \
+  test-github-archive-dashboard \
+  --region=us-central1 \
+  --project=beaming-glyph-489707-b8 \
+  --format="value(status.url)"
+
+# Copy URL → paste in browser</code></pre>
+      <div class="box red">
+        <h4>If nothing works</h4>
+        <ul>
+          <li>Open Cloud Shell: <code>shell.cloud.google.com</code></li>
+          <li>Run proxy in Cloud Shell</li>
+          <li>Use Cloud Shell "Web Preview" on port 8080</li>
+          <li>Share Cloud Shell browser tab</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h4>Pre-check before presentation</h4>
+        <ul>
+          <li>Verify infra is deployed: <code>terraform output</code></li>
+          <li>Trigger one pipeline run to populate dashboard</li>
+          <li>Test proxy from corporate network</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /slides -->
+</div><!-- /reveal -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/monokai.css">
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: true,
+    plugins: [ RevealHighlight ],
+    width: 1280,
+    height: 800,
+    margin: 0.02,
+    center: false,
+  });
+</script>
+</body>
+</html>
