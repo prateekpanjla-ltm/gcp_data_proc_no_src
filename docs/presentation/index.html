@@ -312,34 +312,34 @@ data "terraform_remote_state" "phase1" {
   <p class="subtitle">Terraform builds this graph from our <code>.tf</code> files. Same color = same execution level (created in parallel).</p>
   <div class="columns">
     <div class="col" style="flex:0.4">
-      <pre style="font-size:0.55em"><code class="language-hcl"># Phase 1 Terraform (simplified)
+      <pre style="font-size:0.55em;text-align:left;background:#f8f9fa;padding:0.6em;border-radius:8px;border:1px solid #ddd;line-height:1.4"><span style="color:#888"># Phase 1 Terraform (simplified)</span>
 
-resource "google_project_service" "apis" { }
+<span style="background:#e8f0fe;padding:1px 4px;border-radius:3px">resource "google_project_service" "apis" { }</span>
 
-resource "google_service_account" "deployer" {
-  depends_on = [google_project_service.apis]
-}
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">resource "google_service_account" "deployer" {</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">  depends_on = [google_project_service.apis]</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">}</span>
 
-resource "google_service_account" "cloud_build" {
-  depends_on = [google_project_service.apis]
-}
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">resource "google_service_account" "cloud_build" {</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">  depends_on = [google_project_service.apis]</span>
+<span style="background:#fef7e0;padding:1px 4px;border-radius:3px">}</span>
 
-resource "google_project_iam_member" "build_roles" {
-  member = google_service_account.cloud_build.email
-}
+<span style="background:#fce8e6;padding:1px 4px;border-radius:3px">resource "google_project_iam_member" "build_roles" {</span>
+<span style="background:#fce8e6;padding:1px 4px;border-radius:3px">  member = google_service_account.cloud_build.email</span>
+<span style="background:#fce8e6;padding:1px 4px;border-radius:3px">}</span>
 
-resource "null_resource" "wait_iam" {
-  depends_on = [google_project_iam_member.build_roles]
-}
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">resource "null_resource" "wait_iam" {</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">  depends_on = [google_project_iam_member.build_roles]</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">}</span>
 
-resource "null_resource" "build_image" {
-  depends_on = [null_resource.wait_iam]
-}
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">resource "null_resource" "build_image" {</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">  depends_on = [null_resource.wait_iam]</span>
+<span style="background:#e6f4ea;padding:1px 4px;border-radius:3px">}</span>
 
-resource "google_cloud_run_v2_job" "downloader" {
-  service_account = google_service_account.deployer.email
-  depends_on = [null_resource.build_image]
-}</code></pre>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">resource "google_cloud_run_v2_job" "downloader" {</span>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">  service_account = google_service_account.deployer.email</span>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">  depends_on = [null_resource.build_image]</span>
+<span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">}</span></pre>
     </div>
     <div class="col" style="flex:0.6">
       <pre class="mermaid">
@@ -447,9 +447,9 @@ flowchart TD
     <div class="col">
       <pre class="mermaid">
 flowchart TD
-  D[Deployer SA] -->|"associate\n(actAs)"| DL[Downloader SA]
-  D -->|"associate"| PR[Processor SA]
-  D -->|"associate"| CB[Cloud Build SA]
+  D["Deployer SA\ntest-tf-deployer@project"] -->|"associate\n(actAs)"| DL["Downloader SA\ntest-github-archive-downloader@project"]
+  D -->|"associate"| PR["Processor SA\ntest-github-archive-processor@project"]
+  D -->|"associate"| CB["Cloud Build SA\ntest-cloud-build@project"]
   DL --> CRJ[Cloud Run Job]
   PR --> CRS[Cloud Run Service]
   style D fill:#fef7e0,stroke:#b08200
@@ -461,8 +461,8 @@ flowchart TD
     <div class="col">
       <pre class="mermaid">
 flowchart TD
-  SA1[Scheduler Agent] -->|"tokenCreator"| SCH[Scheduler SA]
-  SA2[Pub/Sub Agent] -->|"tokenCreator"| INV[Invoker SA]
+  SA1["Scheduler Agent\nservice-PROJECT_NUM@gcp-sa-cloudscheduler.iam"] -->|"tokenCreator"| SCH["Scheduler SA\ntest-scheduler@project"]
+  SA2["Pub/Sub Agent\nservice-PROJECT_NUM@gcp-sa-pubsub.iam"] -->|"tokenCreator"| INV["Invoker SA\ntest-eventarc-invoker@project"]
   SCH -->|"OIDC\ntoken"| CR1[Cloud Run Job]
   INV -->|"OIDC\ntoken"| CR2[Cloud Run Service]
   style SA1 fill:#fce8e6,stroke:#c5221f
