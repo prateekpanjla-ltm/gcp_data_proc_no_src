@@ -147,50 +147,54 @@ terraform destroy -auto-approve \
 <!-- ==================== RUNBOOK 3: Clean Stale SAs ==================== -->
 <section>
   <h2>Runbook 3: Identify & Clean Stale SAs</h2>
-  <pre><code class="language-bash"># 1. List all SAs in project
-gcloud iam service-accounts list \
-  --project=beaming-glyph-489707-b8 \
-  --format="table(email, displayName, disabled)"
-
-# 2. Find SAs active in the last 7 days (from audit logs)
-gcloud logging read \
-  'protoPayload.authenticationInfo.principalEmail:".iam.gserviceaccount.com"
-   AND timestamp>="2026-03-12T00:00:00Z"' \
-  --project=beaming-glyph-489707-b8 \
-  --format="value(protoPayload.authenticationInfo.principalEmail)" \
-  | sort -u > /tmp/active_sas.txt
-
-# 3. Compare: find SAs with no recent activity
-gcloud iam service-accounts list \
-  --project=beaming-glyph-489707-b8 \
-  --format="value(email)" | while read sa; do
-  if ! grep -q "$sa" /tmp/active_sas.txt 2>/dev/null; then
-    echo "STALE: $sa"
-  fi
-done
-
-# 4. Delete a confirmed stale SA (careful!)
-# gcloud iam service-accounts delete SA_EMAIL \
-#   --project=beaming-glyph-489707-b8 --quiet</code></pre>
   <div class="columns">
     <div class="col">
-      <div class="box yellow">
-        <h4>SAs to NEVER delete</h4>
-        <ul>
-          <li><code>test-terraform-deployer@...</code> (deployer)</li>
-          <li><code>*-compute@developer...</code> (default compute)</li>
-          <li><code>service-*@gcp-sa-*</code> (Google service agents)</li>
-        </ul>
+      <div class="box green">
+        <h4>Option A: Use the cleanup script (recommended)</h4>
       </div>
+      <pre><code class="language-bash"># Interactive script: finds stale SAs, prompts for each
+./infrastructure/scripts/cleanup-stale-sas.sh \
+  beaming-glyph-489707-b8 7
+
+# What it does:
+# 1. Lists all SAs in project
+# 2. Filters out protected accounts automatically:
+#    - *-compute@developer (default compute)
+#    - *@appspot (App Engine default)
+#    - service-*@gcp-sa-* (Google agents)
+#    - *terraform-deployer* (our deployers)
+#    - *@cloudbuild (Cloud Build agent)
+# 3. Checks audit logs for activity in last N days
+# 4. Shows each stale SA with details (name, roles)
+# 5. Asks y/N for each before deleting</code></pre>
     </div>
     <div class="col">
-      <div class="box">
-        <h4>Safe to delete after destroy</h4>
+      <div class="box yellow">
+        <h4>Option B: Manual check</h4>
+      </div>
+      <pre><code class="language-bash"># List all SAs
+gcloud iam service-accounts list \
+  --project=beaming-glyph-489707-b8 \
+  --format="table(email, displayName)"
+
+# Check specific SA activity
+gcloud logging read \
+  'protoPayload.authenticationInfo.principalEmail:
+   "SA_EMAIL"
+   AND timestamp>="2026-03-12T00:00:00Z"' \
+  --project=beaming-glyph-489707-b8 --limit=5
+
+# Delete (after confirming stale)
+gcloud iam service-accounts delete SA_EMAIL \
+  --project=beaming-glyph-489707-b8</code></pre>
+      <div class="box red">
+        <h4>Auto-protected (never deleted by script)</h4>
         <ul>
-          <li><code>test-github-archive-downloader@...</code></li>
-          <li><code>test-github-archive-processor@...</code></li>
-          <li><code>test-bq-loader@...</code></li>
-          <li><code>test-cloud-build@...</code></li>
+          <li><code>*-compute@developer...</code></li>
+          <li><code>*@appspot.gserviceaccount.com</code></li>
+          <li><code>service-*@gcp-sa-*</code></li>
+          <li><code>*@cloudbuild.gserviceaccount.com</code></li>
+          <li><code>*terraform-deployer*</code></li>
         </ul>
       </div>
     </div>
