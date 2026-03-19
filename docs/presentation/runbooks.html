@@ -150,28 +150,67 @@ terraform destroy -auto-approve \
   <div class="columns">
     <div class="col">
       <div class="box green">
-        <h4>Option A: Use the cleanup script (recommended)</h4>
+        <h4>Run in Cloud Shell (copy-paste the whole block)</h4>
       </div>
-      <pre><code class="language-bash"># From Cloud Shell (already authenticated):
-git clone https://github.com/prateekpanjla-outlook/gcp_data_proc_ltm.git
-cd gcp_data_proc_ltm
-chmod +x infrastructure/scripts/cleanup-stale-sas.sh
+      <pre><code class="language-bash"># Save this as cleanup-stale-sas.sh in Cloud Shell, then run:
+#   chmod +x cleanup-stale-sas.sh
+#   ./cleanup-stale-sas.sh beaming-glyph-489707-b8 7
+#                                                   ^ days of inactivity
 
-# Interactive: finds stale SAs, prompts for each
-./infrastructure/scripts/cleanup-stale-sas.sh \
-  beaming-glyph-489707-b8 7
+cat > cleanup-stale-sas.sh << 'SCRIPT'
+#!/bin/bash
+set -e
+PROJECT_ID="${1:?Usage: $0 PROJECT_ID [DAYS]}"
+DAYS="${2:-7}"
+echo "=== Stale SA Cleanup | Project: $PROJECT_ID | Threshold: ${DAYS} days ==="
 
-# What it does:
-# 1. Lists all SAs in project
-# 2. Filters out protected accounts automatically:
-#    - *-compute@developer (default compute)
-#    - *@appspot (App Engine default)
-#    - service-*@gcp-sa-* (Google agents)
-#    - *terraform-deployer* (our deployers)
-#    - *@cloudbuild (Cloud Build agent)
-# 3. Checks audit logs for activity in last N days
-# 4. Shows each stale SA with details (name, roles)
-# 5. Asks y/N for each before deleting</code></pre>
+# Protected patterns (never delete)
+is_protected() {
+  echo "$1" | grep -qE "(-compute@developer|@appspot\.|@cloudservices\.|service-[0-9]+@gcp-sa-|@cloudbuild\.gserviceaccount|terraform-deployer|tf-deployer)"
+}
+
+# Get active SAs from audit logs
+SINCE=$(date -u -d "${DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
+ACTIVE=$(gcloud logging read \
+  "protoPayload.authenticationInfo.principalEmail:\".iam.gserviceaccount.com\" AND timestamp>=\"${SINCE}\"" \
+  --project="$PROJECT_ID" --format="value(protoPayload.authenticationInfo.principalEmail)" --limit=1000 2>/dev/null | sort -u)
+
+# Check each SA
+STALE=()
+for sa in $(gcloud iam service-accounts list --project="$PROJECT_ID" --format="value(email)"); do
+  if is_protected "$sa"; then
+    echo "PROTECTED: $sa"
+  elif echo "$ACTIVE" | grep -q "$sa"; then
+    echo "ACTIVE:    $sa"
+  else
+    echo "STALE:     $sa"
+    STALE+=("$sa")
+  fi
+done
+
+echo ""
+if [ ${#STALE[@]} -eq 0 ]; then echo "No stale SAs found."; exit 0; fi
+echo "=== Found ${#STALE[@]} stale SA(s). Prompting for deletion... ==="
+
+for sa in "${STALE[@]}"; do
+  echo "────────────────────────────────"
+  echo "  SA:   $sa"
+  NAME=$(gcloud iam service-accounts describe "$sa" --project="$PROJECT_ID" --format="value(displayName)" 2>/dev/null || echo "?")
+  echo "  Name: $NAME"
+  ROLES=$(gcloud projects get-iam-policy "$PROJECT_ID" --flatten="bindings[].members" \
+    --filter="bindings.members:${sa}" --format="value(bindings.role)" 2>/dev/null | head -5)
+  [ -n "$ROLES" ] && echo "  Roles:" && echo "$ROLES" | sed 's/^/    - /' || echo "  Roles: (none)"
+  echo ""
+  read -p "  Delete? [y/N]: " CONFIRM
+  if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+    gcloud iam service-accounts delete "$sa" --project="$PROJECT_ID" --quiet && echo "  DELETED." || echo "  FAILED."
+  else
+    echo "  Skipped."
+  fi
+done
+SCRIPT
+chmod +x cleanup-stale-sas.sh
+echo "Script saved. Run: ./cleanup-stale-sas.sh beaming-glyph-489707-b8 7"</code></pre>
     </div>
     <div class="col">
       <div class="box yellow">
