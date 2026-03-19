@@ -15,7 +15,7 @@ resource "null_resource" "wait_for_iam_propagation" {
     command     = <<-SCRIPT
       SA="${google_service_account.cloudbuild_sa.email}"
       BUCKET="${var.project_id}_cloudbuild"
-      MAX_ATTEMPTS=12
+      MAX_ATTEMPTS=18
       for i in $(seq 1 $MAX_ATTEMPTS); do
         echo "Checking IAM propagation (attempt $i/$MAX_ATTEMPTS)..."
         TOKEN=$(gcloud auth print-access-token --impersonate-service-account="$SA" 2>/dev/null)
