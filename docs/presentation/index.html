@@ -149,7 +149,8 @@ flowchart TD
   <p>Terraform reads <code>.tf</code> files, builds a <strong>dependency graph</strong> (like an AST), determines the order of operations, and applies changes to match the desired state.</p>
   <div class="columns">
     <div class="col">
-      <pre class="mermaid">
+      <pre class="mermaid" style="min-height:400px">
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'18px'}, 'flowchart': {'nodeSpacing': 30, 'rankSpacing': 40}}}%%
 flowchart TD
   TF[".tf files\n(HCL code)"] -->|"1. Parse"| AST["Dependency Graph\n(resource DAG)"]
   AST -->|"2. Plan"| PLAN["Execution Plan\nwhat to create/update/destroy"]
@@ -206,10 +207,16 @@ resource "<span style="background:#e8f0fe;padding:0 4px;border-radius:3px;font-w
   <span style="color:#888">#     and builds the dependency edge</span>
 }</pre>
       <div style="font-size:0.6em;display:flex;gap:1em;margin-top:0.3em">
-        <span><span style="background:#e6f4ea;padding:1px 6px;border-radius:3px">■</span> Created 1st (dependency)</span>
-        <span><span style="background:#e8f0fe;padding:1px 6px;border-radius:3px">■</span> Created 2nd (depends on SA)</span>
-        <span><span style="background:#fce8e6;padding:1px 6px;border-radius:3px;text-decoration:underline">■</span> The reference that creates the edge</span>
+        <span><span style="background:#e6f4ea;padding:1px 6px;border-radius:3px">■</span> Created 1st</span>
+        <span><span style="background:#e8f0fe;padding:1px 6px;border-radius:3px">■</span> Created 2nd</span>
+        <span><span style="background:#fce8e6;padding:1px 6px;border-radius:3px;text-decoration:underline">■</span> The reference</span>
       </div>
+      <pre class="mermaid">
+flowchart LR
+  SA1[Service Account] -->|"referenced by"| CR1[Cloud Run]
+  style SA1 fill:#e6f4ea,stroke:#188038
+  style CR1 fill:#e8f0fe,stroke:#1967d2
+      </pre>
     </div>
     <div class="col">
       <div class="box red">
@@ -229,22 +236,17 @@ resource "google_cloud_run_v2_service" "svc" {
   # Terraform can't see the connection — force it:
   depends_on = [null_resource.build_image]
 }</code></pre>
-    </div>
-  </div>
-  <pre class="mermaid">
+      <pre class="mermaid">
 flowchart LR
-  subgraph "Implicit (auto-detected)"
-    SA1[Service Account] -->|"referenced by"| CR1[Cloud Run]
-  end
-  subgraph "Explicit (depends_on)"
-    BUILD[null_resource\nbuild image] -->|"depends_on"| CR2[Cloud Run]
-    IAM[IAM Grant] -->|"depends_on"| WAIT[null_resource\nwait for propagation]
-    WAIT -->|"depends_on"| BUILD
-  end
-  style SA1 fill:#e6f4ea,stroke:#188038
+  IAM[IAM Grant] -->|"depends_on"| WAIT[null_resource\nwait]
+  WAIT -->|"depends_on"| BUILD[null_resource\nbuild image]
+  BUILD -->|"depends_on"| CR2[Cloud Run]
   style BUILD fill:#fef7e0,stroke:#b08200
   style WAIT fill:#fce8e6,stroke:#c5221f
-  </pre>
+  style CR2 fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+  </div>
 </section>
 
 <!-- ==================== SLIDE 3d: null_resource and data sources ==================== -->
@@ -257,7 +259,7 @@ flowchart LR
         <h4><code>null_resource</code> + <code>local-exec</code></h4>
         <p style="font-size:0.75em">Runs arbitrary shell commands during <code>terraform apply</code>. We use it for things Terraform can't do natively.</p>
       </div>
-      <pre><code class="language-hcl"># Use case 1: Activate service agents
+      <pre style="font-size:0.75em"><code class="language-hcl"># Use case 1: Activate service agents
 resource "null_resource" "init_agents" {
   provisioner "local-exec" {
     command = "gcloud beta services identity create ..."
@@ -284,7 +286,7 @@ resource "null_resource" "wait_iam" {
         <h4><code>data</code> sources</h4>
         <p style="font-size:0.75em">Read-only lookups — fetch information from GCP without creating anything. Used to get project numbers, existing resources, etc.</p>
       </div>
-      <pre><code class="language-hcl"># Look up project number (needed for service agents)
+      <pre style="font-size:0.75em"><code class="language-hcl"># Look up project number (needed for service agents)
 data "google_project" "current" {
   project_id = var.project_id
 }
@@ -312,7 +314,7 @@ data "terraform_remote_state" "phase1" {
   <p class="subtitle">Terraform builds this graph from our <code>.tf</code> files. Same color = same execution level (created in parallel).</p>
   <div class="columns">
     <div class="col" style="flex:0.4">
-      <pre style="font-size:0.55em;text-align:left;background:#f8f9fa;padding:0.6em;border-radius:8px;border:1px solid #ddd;line-height:1.4"><span style="color:#888"># Phase 1 Terraform (simplified)</span>
+      <pre style="font-size:0.825em;text-align:left;background:#f8f9fa;padding:0.6em;border-radius:8px;border:1px solid #ddd;line-height:1.4"><span style="color:#888"># Phase 1 Terraform (simplified)</span>
 
 <span style="background:#e8f0fe;padding:1px 4px;border-radius:3px">resource "google_project_service" "apis" { }</span>
 
@@ -342,7 +344,8 @@ data "terraform_remote_state" "phase1" {
 <span style="background:#f3e8fd;padding:1px 4px;border-radius:3px">}</span></pre>
     </div>
     <div class="col" style="flex:0.6">
-      <pre class="mermaid">
+      <pre class="mermaid" style="min-height:450px">
+%%{init: {'theme':'base', 'themeVariables': {'fontSize':'16px'}, 'flowchart': {'nodeSpacing': 25, 'rankSpacing': 35}}}%%
 flowchart TD
   subgraph L1["Level 1 — Enable APIs"]
     APIS["google_project_service\napis"]
@@ -738,6 +741,54 @@ flowchart LR
           <li>All must be activated + granted permissions explicitly</li>
         </ul>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== SLIDE 10b: Why Service Agents? ==================== -->
+<section data-focus="agents">
+  <h2>Service Agents: The Invisible Plumbing</h2>
+  <p class="subtitle">Service agents are <strong>Google-managed identities</strong> that handle infrastructure work behind the scenes. You don't create them — Google does. But you <strong>must</strong> grant them IAM permissions.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>Why do we need them?</h4>
+        <ul>
+          <li>When Cloud Scheduler calls Cloud Run, <strong>someone</strong> needs to mint the OIDC auth token</li>
+          <li>When a file lands in GCS, <strong>someone</strong> needs to publish the event to Pub/Sub for Eventarc</li>
+          <li>When Eventarc delivers an event, <strong>someone</strong> needs to authenticate the HTTP call to Cloud Run</li>
+          <li>Your code doesn't do this — <strong>service agents</strong> do</li>
+        </ul>
+      </div>
+      <div class="box red">
+        <h4>The catch with Eventarc</h4>
+        <p style="font-size:0.75em">Eventarc requires <strong>explicit activation</strong> of both the Storage and Eventarc service agents via <code>gcloud beta services identity create</code>. Without this, the agents don't exist and IAM grants fail silently.</p>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  subgraph "Phase 1: Scheduled Download"
+    SCHED_AGENT["Scheduler Agent\nservice-NUM@gcp-sa-\ncloudscheduler.iam"] -->|"mints OIDC token\n(needs tokenCreator)"| SCHED_SA["Scheduler SA"]
+    SCHED_SA -->|"authenticated call"| CRJ["Cloud Run Job\n(downloader)"]
+  end
+  subgraph "Phase 2: Event-driven Processing"
+    GCS["File lands in GCS"] --> STORAGE_AGENT["Storage Agent\nservice-NUM@gs-project-\naccounts.iam"]
+    STORAGE_AGENT -->|"publishes event\n(needs pubsub.publisher)"| PUBSUB["Pub/Sub"]
+    PUBSUB --> EVENTARC_AGENT["Eventarc Agent\nservice-NUM@gcp-sa-\neventarc.iam"]
+    EVENTARC_AGENT -->|"routes event\n(needs eventarc.eventReceiver)"| PUBSUB_AGENT["Pub/Sub Agent\nservice-NUM@gcp-sa-\npubsub.iam"]
+    PUBSUB_AGENT -->|"mints OIDC token\n(needs tokenCreator)"| INV["Invoker SA"]
+    INV -->|"authenticated call"| CRS["Cloud Run Service\n(processor)"]
+  end
+  style SCHED_AGENT fill:#fce8e6,stroke:#c5221f
+  style STORAGE_AGENT fill:#fce8e6,stroke:#c5221f
+  style EVENTARC_AGENT fill:#fce8e6,stroke:#c5221f
+  style PUBSUB_AGENT fill:#fce8e6,stroke:#c5221f
+  style SCHED_SA fill:#e6f4ea,stroke:#188038
+  style INV fill:#e6f4ea,stroke:#188038
+  style CRJ fill:#e8f0fe,stroke:#1967d2
+  style CRS fill:#e8f0fe,stroke:#1967d2
+      </pre>
     </div>
   </div>
 </section>
