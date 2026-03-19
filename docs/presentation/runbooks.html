@@ -158,103 +158,57 @@ terraform destroy -auto-approve \
   </div>
 </section>
 
-<!-- ==================== RUNBOOK 3: Clean Stale SAs ==================== -->
+<!-- ==================== RUNBOOK 3: Clean Orphaned IAM Bindings ==================== -->
 <section>
-  <h2>Runbook 3: Identify & Clean Stale SAs</h2>
+  <h2>Runbook 3: Clean Orphaned IAM Bindings</h2>
+  <p class="subtitle">After destroy, GCP leaves "deleted:serviceAccount:..." entries in the IAM policy. These can block redeployment.</p>
   <div class="columns">
     <div class="col">
-      <div class="box green">
-        <h4>Run in Cloud Shell (copy-paste the whole block)</h4>
+      <div class="box red">
+        <h4>The problem</h4>
+        <ul>
+          <li>Terraform destroys SAs during <code>terraform destroy</code></li>
+          <li>GCP renames them to <code>deleted:serviceAccount:email?uid=...</code></li>
+          <li>IAM bindings pointing to deleted SAs remain in project policy</li>
+          <li>On redeploy, Terraform creates SA with same email but new UID</li>
+          <li>Old orphaned bindings can conflict with new ones</li>
+        </ul>
       </div>
-      <pre><code class="language-bash"># Save this as cleanup-stale-sas.sh in Cloud Shell, then run:
-#   chmod +x cleanup-stale-sas.sh
-#   ./cleanup-stale-sas.sh beaming-glyph-489707-b8 7
-#                                                   ^ days of inactivity
-
-cat > cleanup-stale-sas.sh << 'SCRIPT'
-#!/bin/bash
-set -e
-PROJECT_ID="${1:?Usage: $0 PROJECT_ID [DAYS]}"
-DAYS="${2:-7}"
-echo "=== Stale SA Cleanup | Project: $PROJECT_ID | Threshold: ${DAYS} days ==="
-
-# Protected patterns (never delete)
-is_protected() {
-  echo "$1" | grep -qE "(-compute@developer|@appspot\.|@cloudservices\.|service-[0-9]+@gcp-sa-|@cloudbuild\.gserviceaccount|terraform-deployer|tf-deployer)"
-}
-
-# Get active SAs from audit logs
-SINCE=$(date -u -d "${DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
-ACTIVE=$(gcloud logging read \
-  "protoPayload.authenticationInfo.principalEmail:\".iam.gserviceaccount.com\" AND timestamp>=\"${SINCE}\"" \
-  --project="$PROJECT_ID" --format="value(protoPayload.authenticationInfo.principalEmail)" --limit=1000 2>/dev/null | sort -u)
-
-# Check each SA
-STALE=()
-for sa in $(gcloud iam service-accounts list --project="$PROJECT_ID" --format="value(email)"); do
-  if is_protected "$sa"; then
-    echo "PROTECTED: $sa"
-  elif echo "$ACTIVE" | grep -q "$sa"; then
-    echo "ACTIVE:    $sa"
-  else
-    echo "STALE:     $sa"
-    STALE+=("$sa")
-  fi
-done
-
-echo ""
-if [ ${#STALE[@]} -eq 0 ]; then echo "No stale SAs found."; exit 0; fi
-echo "=== Found ${#STALE[@]} stale SA(s). Prompting for deletion... ==="
-
-for sa in "${STALE[@]}"; do
-  echo "────────────────────────────────"
-  echo "  SA:   $sa"
-  NAME=$(gcloud iam service-accounts describe "$sa" --project="$PROJECT_ID" --format="value(displayName)" 2>/dev/null || echo "?")
-  echo "  Name: $NAME"
-  ROLES=$(gcloud projects get-iam-policy "$PROJECT_ID" --flatten="bindings[].members" \
-    --filter="bindings.members:${sa}" --format="value(bindings.role)" 2>/dev/null | head -5)
-  [ -n "$ROLES" ] && echo "  Roles:" && echo "$ROLES" | sed 's/^/    - /' || echo "  Roles: (none)"
-  echo ""
-  read -p "  Delete? [y/N]: " CONFIRM
-  if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
-    gcloud iam service-accounts delete "$sa" --project="$PROJECT_ID" --quiet && echo "  DELETED." || echo "  FAILED."
-  else
-    echo "  Skipped."
-  fi
-done
-SCRIPT
-chmod +x cleanup-stale-sas.sh
-echo "Script saved. Run: ./cleanup-stale-sas.sh beaming-glyph-489707-b8 7"</code></pre>
+      <div class="box green">
+        <h4>Automated fix (runs with destroy script)</h4>
+        <p style="font-size:0.8em"><code>destroy-all-phases.sh</code> now cleans orphaned bindings automatically as a final step.</p>
+      </div>
     </div>
     <div class="col">
       <div class="box yellow">
-        <h4>Option B: Manual check</h4>
+        <h4>Manual check & cleanup (Cloud Shell)</h4>
       </div>
-      <pre><code class="language-bash"># List all SAs
-gcloud iam service-accounts list \
-  --project=beaming-glyph-489707-b8 \
-  --format="table(email, displayName)"
+      <pre><code class="language-bash"># Check for orphaned bindings:
+gcloud projects get-iam-policy \
+  beaming-glyph-489707-b8 --format=json \
+  | grep "deleted:serviceAccount:"
 
-# Check specific SA activity
-gcloud logging read \
-  'protoPayload.authenticationInfo.principalEmail:
-   "SA_EMAIL"
-   AND timestamp>="2026-03-12T00:00:00Z"' \
-  --project=beaming-glyph-489707-b8 --limit=5
+# Clean all orphaned bindings:
+P="beaming-glyph-489707-b8"
+gcloud projects get-iam-policy $P --format=json \
+  > /tmp/policy.json
 
-# Delete (after confirming stale)
-gcloud iam service-accounts delete SA_EMAIL \
-  --project=beaming-glyph-489707-b8</code></pre>
-      <div class="box red">
-        <h4>Auto-protected (never deleted by script)</h4>
-        <ul>
-          <li><code>*-compute@developer...</code></li>
-          <li><code>*@appspot.gserviceaccount.com</code></li>
-          <li><code>service-*@gcp-sa-*</code></li>
-          <li><code>*@cloudbuild.gserviceaccount.com</code></li>
-          <li><code>*terraform-deployer*</code></li>
-        </ul>
-      </div>
+python3 -c "
+import json
+with open('/tmp/policy.json') as f:
+    p = json.load(f)
+for b in p.get('bindings', []):
+    b['members'] = [m for m in b['members']
+      if not m.startswith('deleted:')]
+p['bindings'] = [b for b in p['bindings']
+  if b.get('members')]
+with open('/tmp/policy.json', 'w') as f:
+    json.dump(p, f, indent=2)
+print('Cleaned')
+"
+
+gcloud projects set-iam-policy $P \
+  /tmp/policy.json --quiet</code></pre>
     </div>
   </div>
 </section>
