@@ -158,23 +158,36 @@ flowchart TD
       </div>
     </div>
   </div>
-  <p class="center" style="margin-top:15px"><span class="tag yellow">Key insight:</span> Most tutorials show one SA with Editor role. Production needs this 3-layer model.</p>
-  <pre class="mermaid">
-flowchart LR
-  D[Deployer SA] -->|associate| DL[Downloader SA]
-  D -->|associate| PR[Processor SA]
-  D -->|associate| CB[Cloud Build SA]
-  SA1[Scheduler Agent] -->|tokenCreator| SCH[Scheduler SA]
-  SA2[Pub/Sub Agent] -->|tokenCreator| INV[Invoker SA]
-  SCH -->|OIDC token| CR1[Cloud Run Job]
-  INV -->|OIDC token| CR2[Cloud Run Service]
+  <p class="center"><span class="tag yellow">Key insight:</span> Most tutorials show one SA with Editor role. Production needs this 3-layer model.</p>
+  <div class="columns">
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  D[Deployer SA] -->|"associate\n(actAs)"| DL[Downloader SA]
+  D -->|"associate"| PR[Processor SA]
+  D -->|"associate"| CB[Cloud Build SA]
+  DL --> CRJ[Cloud Run Job]
+  PR --> CRS[Cloud Run Service]
   style D fill:#fef7e0,stroke:#b08200
   style DL fill:#e6f4ea,stroke:#188038
   style PR fill:#e6f4ea,stroke:#188038
   style CB fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  SA1[Scheduler Agent] -->|"tokenCreator"| SCH[Scheduler SA]
+  SA2[Pub/Sub Agent] -->|"tokenCreator"| INV[Invoker SA]
+  SCH -->|"OIDC\ntoken"| CR1[Cloud Run Job]
+  INV -->|"OIDC\ntoken"| CR2[Cloud Run Service]
   style SA1 fill:#fce8e6,stroke:#c5221f
   style SA2 fill:#fce8e6,stroke:#c5221f
-  </pre>
+  style SCH fill:#e6f4ea,stroke:#188038
+  style INV fill:#e6f4ea,stroke:#188038
+      </pre>
+    </div>
+  </div>
   <aside class="notes">
     Most tutorials show a single SA with Editor role (3000+ permissions).
     Production needs 3 layers: deployer, runtime SAs, service agents.
@@ -322,33 +335,57 @@ flowchart LR
 <!-- ==================== SLIDE 7: tokenCreator ==================== -->
 <section>
   <h2>tokenCreator: The Authentication Chain</h2>
-  <p class="subtitle">When Cloud Scheduler calls Cloud Run with OIDC auth, someone needs to mint the token</p>
-  <pre class="mermaid">
+  <div class="columns">
+    <div class="col" style="flex:1.2">
+      <div class="box yellow">
+        <h4>The Problem</h4>
+        <ul>
+          <li>Cloud Scheduler needs to call Cloud Run via HTTP</li>
+          <li>Cloud Run requires authentication (OIDC token)</li>
+          <li>Scheduler can't mint tokens itself -- it asks its <strong>service agent</strong></li>
+          <li>Agent needs <code>tokenCreator</code> ON the scheduler SA to mint the token</li>
+        </ul>
+      </div>
+      <div class="box red">
+        <h4>Same pattern for Eventarc</h4>
+        <ul>
+          <li>GCS event --> Pub/Sub delivers to Cloud Run</li>
+          <li>Pub/Sub agent needs <code>tokenCreator</code> ON invoker SA</li>
+          <li>Without it: event delivered, Cloud Run returns <strong>403 silently</strong></li>
+        </ul>
+      </div>
+      <pre><code class="language-hcl"># Terraform fix:
+resource "google_service_account_iam_member" "token" {
+  service_account_id = google_service_account.scheduler.name
+  role         = "roles/iam.serviceAccountTokenCreator"
+  member       = "serviceAccount:service-NUM@gcp-sa-cloudscheduler..."
+}</code></pre>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
 sequenceDiagram
   participant CS as Cloud Scheduler
   participant CSA as Scheduler Agent
   participant SA as Scheduler SA
   participant CR as Cloud Run Job
-  CS->>CSA: "I need to call Cloud Run"
-  CSA->>CSA: Check: do I have tokenCreator on Scheduler SA?
+  CS->>CSA: I need to call Cloud Run
+  CSA->>CSA: Do I have tokenCreator?
   CSA->>SA: Generate OIDC token
   SA-->>CS: OIDC token
-  CS->>CR: HTTP request + OIDC token
-  CR->>CR: Validate token, check run.invoker
+  CS->>CR: HTTP + OIDC token
+  CR->>CR: Validate token
   CR-->>CS: 200 OK
-  </pre>
-  <pre><code class="language-hcl"># Terraform fix (service_accounts.tf):
-resource "google_service_account_iam_member" "scheduler_token_creator" {
-  service_account_id = google_service_account.scheduler.name
-  role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:service-PROJECT_NUM@gcp-sa-cloudscheduler.iam..."
-}</code></pre>
-  <p><span class="highlight">If you miss any link: the trigger fires, but authentication fails silently</span></p>
+      </pre>
+    </div>
+  </div>
+  <p><span class="tag red">Key:</span> actAs = associate SA with resource (deploy time) | tokenCreator = mint auth tokens as SA (runtime)</p>
   <aside class="notes">
-    tokenCreator is the second hidden IAM pattern.
-    The Agent needs tokenCreator permission ON the SA it's minting tokens for.
-    Same pattern for Eventarc: Pub/Sub agent needs tokenCreator on invoker SA.
-    Key distinction: actAs = "associate SA with resource", tokenCreator = "mint auth tokens as SA"
+    tokenCreator is needed because Cloud Run requires authenticated calls.
+    Cloud Scheduler/Eventarc can't call Cloud Run directly -- they need OIDC tokens.
+    The service agent (Google-managed) mints the token, but needs explicit permission.
+    This is a RUNTIME permission (every time the trigger fires), unlike actAs which is DEPLOY time.
+    The silent failure is the worst part: the trigger fires, the event is delivered,
+    but Cloud Run returns 403 and the event goes to dead letter. No error in trigger logs.
   </aside>
 </section>
 
