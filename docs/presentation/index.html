@@ -40,6 +40,15 @@
     .reveal .center { text-align: center; }
     .reveal .small { font-size: 0.65em; }
     .slide-number { font-size: 14px !important; }
+    /* Architecture map bar */
+    .arch-map { display: flex; gap: 3px; font-size: 0.5em; margin-bottom: 6px; padding: 4px 0; border-bottom: 1px solid #e0e0e0; }
+    .arch-map .node { padding: 3px 6px; border-radius: 3px; background: #e8eaf0; color: #666; text-align: center; white-space: nowrap; }
+    .arch-map .node.active { background: #1a56db; color: white; font-weight: bold; }
+    .arch-map .arrow { color: #ccc; padding: 0 2px; align-self: center; }
+    .arch-map .arrow.active { color: #1a56db; }
+    .arch-map .group { display: flex; gap: 3px; align-items: center; border: 1px solid #e0e0e0; border-radius: 4px; padding: 2px 4px; }
+    .arch-map .group.active { border-color: #1a56db; background: #f0f4ff; }
+    .arch-map .label { font-size: 0.8em; color: #999; margin-right: 4px; }
   </style>
 </head>
 <body>
@@ -55,7 +64,7 @@
 </section>
 
 <!-- ==================== SLIDE 2: What I Built ==================== -->
-<section>
+<section data-focus="all">
   <h2>What I Built</h2>
   <p><strong>An automated data pipeline that downloads public GitHub event data every hour, processes and flattens the JSON, and loads it into BigQuery for analysis — fully deployed and destroyed by code.</strong></p>
   <div class="columns">
@@ -106,7 +115,7 @@ flowchart TD
 </section>
 
 <!-- ==================== SLIDE 3: Why Terraform + IAM Issues ==================== -->
-<section>
+<section data-focus="terraform">
   <h2>Why Terraform?</h2>
   <div class="columns">
     <div class="col">
@@ -135,7 +144,7 @@ flowchart TD
 </section>
 
 <!-- ==================== SLIDE 4: Three Stage Terraform ==================== -->
-<section>
+<section data-focus="sa">
   <h2>Three Stages of Terraform IAM</h2>
   <p class="subtitle">SA = Service Account — an identity used by code instead of humans</p>
   <div class="columns">
@@ -206,7 +215,7 @@ flowchart TD
 </section>
 
 <!-- ==================== SLIDE 5: actAs (Associate) ==================== -->
-<section>
+<section data-focus="actas">
   <h2>The "actAs" Permission <span class="muted">(a.k.a. Associate SA)</span></h2>
   <p><span class="tag yellow">Naming confusion:</span> Google calls it "impersonation" — it's also <strong>"associating a SA with a resource"</strong></p>
   <div class="columns">
@@ -249,7 +258,7 @@ flowchart LR
 </section>
 
 <!-- ==================== SLIDE 6: Associate in Practice ==================== -->
-<section>
+<section data-focus="cloudbuild">
   <h2>Associate in Practice: Who Deploys?</h2>
   <p class="subtitle">Two valid approaches. We chose Approach A. Audit logs prove only actAs is checked.</p>
   <div class="columns">
@@ -294,7 +303,7 @@ flowchart LR
 </section>
 
 <!-- ==================== SLIDE 7: tokenCreator ==================== -->
-<section>
+<section data-focus="agents">
   <h2>tokenCreator: The Authentication Chain</h2>
   <p class="subtitle">This involves <strong>Google-managed Service Agents</strong> (not our Service Accounts). Service agents handle infrastructure plumbing — routing events, minting tokens — and need explicit permission grants.</p>
   <div class="columns">
@@ -345,9 +354,9 @@ sequenceDiagram
 </section>
 
 <!-- ==================== SLIDE 8: Service Agents ==================== -->
-<section>
+<section data-focus="agents">
   <h2>Service Agents Are NOT Auto-Created</h2>
-  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists</p>
+  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists. We use service agents in <strong>Phase 1</strong> (Scheduler agent → Cloud Run Job), <strong>Phase 2</strong> (Storage + Eventarc + Pub/Sub agents → Cloud Run Service), and <strong>Phase 3</strong> (same agents → Cloud Function).</p>
   <div class="columns">
     <div class="col">
       <pre><code class="language-hcl"># You'd expect this to work:
@@ -381,7 +390,7 @@ resource "null_resource" "init_agents" {
 </section>
 
 <!-- ==================== SLIDE 9: IAM Propagation ==================== -->
-<section>
+<section data-focus="cloudbuild">
   <h2>IAM Propagation: Eventually Consistent</h2>
   <p class="subtitle">IAM says "granted" but the permission isn't enforced yet (~60s typical, up to 7 min)</p>
   <div class="columns">
@@ -432,7 +441,7 @@ sequenceDiagram
 </section>
 
 <!-- ==================== SLIDE 10: Eventarc Chain ==================== -->
-<section>
+<section data-focus="eventarc">
   <h2>The Eventarc Chain: 5 Bindings, All Required</h2>
   <p><span class="highlight">Miss one binding and it fails silently.</span> This chain is used in <strong>Phase 2</strong> (GCS → processor) and <strong>Phase 3</strong> (GCS → BQ loader). Three service agents involved: Storage, Eventarc, and Pub/Sub.</p>
   <pre class="mermaid">
@@ -474,7 +483,7 @@ flowchart LR
 </section>
 
 <!-- ==================== SLIDE 11: Destroy & Reprovision ==================== -->
-<section>
+<section data-focus="all">
   <h2>Destroy & Reprovision</h2>
   <p><em>"The real test of IaC: can you tear it all down and rebuild the exact same working system?"</em></p>
   <div class="columns">
@@ -513,7 +522,7 @@ destroy.yml          # manual with confirmation</code></pre>
 </section>
 
 <!-- ==================== SLIDE 12: Orphaned IAM Bindings ==================== -->
-<section>
+<section data-focus="iam">
   <h2>Orphaned IAM Bindings After Destroy</h2>
   <p>When Terraform destroys SAs, GCP renames them to <code>deleted:serviceAccount:email?uid=...</code> but <strong>IAM bindings referencing them remain</strong> in the project policy.</p>
   <div class="columns">
@@ -694,6 +703,48 @@ flowchart LR
     margin: 0.02,
     center: false,
   }).then(() => {
+    // Inject architecture map into slides with data-focus
+    const nodes = [
+      { id: 'terraform', label: 'Terraform', groups: ['terraform','all'] },
+      { id: 'deployer', label: 'Deployer SA', groups: ['sa','actas','cloudbuild','terraform','all'] },
+      { id: 'cloudbuild', label: 'Cloud Build', groups: ['cloudbuild','all'] },
+      { id: 'ar', label: 'Artifact Registry', groups: ['cloudbuild','all'] },
+      { id: 'crjob', label: 'Cloud Run Job', groups: ['actas','all'] },
+      { id: 'gcs1', label: 'GCS Landing', groups: ['eventarc','all'] },
+      { id: 'eventarc1', label: 'Eventarc', groups: ['eventarc','agents','all'] },
+      { id: 'crsvc', label: 'Cloud Run Svc', groups: ['actas','eventarc','all'] },
+      { id: 'gcs2', label: 'GCS Staging', groups: ['eventarc','all'] },
+      { id: 'eventarc2', label: 'Eventarc', groups: ['eventarc','agents','all'] },
+      { id: 'cfn', label: 'Cloud Function', groups: ['eventarc','all'] },
+      { id: 'bq', label: 'BigQuery', groups: ['all'] },
+      { id: 'iam', label: 'IAM Bindings', groups: ['sa','actas','agents','iam','all'] },
+      { id: 'agents', label: 'Service Agents', groups: ['agents','all'] },
+    ];
+    document.querySelectorAll('section[data-focus]').forEach(slide => {
+      const focus = slide.getAttribute('data-focus');
+      const map = document.createElement('div');
+      map.className = 'arch-map';
+      nodes.forEach((n, i) => {
+        if (i > 0 && n.id !== 'iam' && n.id !== 'agents') {
+          const arrow = document.createElement('span');
+          arrow.className = 'arrow' + (n.groups.includes(focus) ? ' active' : '');
+          arrow.textContent = '→';
+          map.appendChild(arrow);
+        }
+        if (n.id === 'iam' || n.id === 'agents') {
+          const sep = document.createElement('span');
+          sep.className = 'arrow';
+          sep.textContent = '|';
+          map.appendChild(sep);
+        }
+        const node = document.createElement('span');
+        node.className = 'node' + (n.groups.includes(focus) ? ' active' : '');
+        node.textContent = n.label;
+        map.appendChild(node);
+      });
+      slide.insertBefore(map, slide.firstChild);
+    });
+
     document.querySelectorAll('.mermaid').forEach((el, i) => {
       const code = el.textContent;
       el.removeAttribute('data-processed');
