@@ -176,7 +176,7 @@ flowchart TD
           <li>After apply, Terraform records what it created in a state file</li>
           <li>Next run: compares desired state (.tf files) vs actual state (state file)</li>
           <li>Only applies the <strong>difference</strong> — not everything from scratch</li>
-          <li>We store state in GCS bucket for team access</li>
+          <li>We store state in a <strong>GCS bucket</strong> — single source of truth, prevents conflicts when multiple people or CI/CD pipelines run Terraform</li>
         </ul>
       </div>
     </div>
@@ -193,17 +193,23 @@ flowchart TD
         <h4>Implicit (automatic)</h4>
         <p style="font-size:0.75em">When one resource references another, Terraform knows the order automatically.</p>
       </div>
-      <pre><code class="language-hcl"># Terraform sees: Cloud Run references SA
-# → creates SA first, then Cloud Run
-resource "google_service_account" "processor" {  # ◄── IMPLICIT
-  account_id = "test-processor"                  #     dependency
-}                                                #     (created 1st)
+      <pre style="font-size:0.65em;text-align:left;background:#f8f9fa;padding:0.8em;border-radius:8px;border:1px solid #ddd"><span style="color:#888"># Terraform sees: Cloud Run references SA</span>
+<span style="color:#888"># → creates SA first, then Cloud Run</span>
+resource "<span style="background:#e6f4ea;padding:0 4px;border-radius:3px;font-weight:bold">google_service_account</span>" "<span style="background:#e6f4ea;padding:0 4px;border-radius:3px;font-weight:bold">processor</span>" {
+  account_id = "test-processor"
+}
 
-resource "google_cloud_run_v2_service" "svc" {   # ◄── depends on SA
-  # This reference creates an implicit dependency:
-  service_account = <mark>google_service_account.processor.email</mark>
-  # ^^^ Terraform sees this reference and builds the edge
-}</code></pre>
+resource "<span style="background:#e8f0fe;padding:0 4px;border-radius:3px;font-weight:bold">google_cloud_run_v2_service</span>" "<span style="background:#e8f0fe;padding:0 4px;border-radius:3px;font-weight:bold">svc</span>" {
+  <span style="color:#888"># This reference creates an implicit dependency:</span>
+  service_account = <span style="background:#fce8e6;padding:0 4px;border-radius:3px;font-weight:bold;text-decoration:underline">google_service_account.processor.email</span>
+  <span style="color:#888"># ^^^ Terraform sees this ─────────────┘</span>
+  <span style="color:#888">#     and builds the dependency edge</span>
+}</pre>
+      <div style="font-size:0.6em;display:flex;gap:1em;margin-top:0.3em">
+        <span><span style="background:#e6f4ea;padding:1px 6px;border-radius:3px">■</span> Created 1st (dependency)</span>
+        <span><span style="background:#e8f0fe;padding:1px 6px;border-radius:3px">■</span> Created 2nd (depends on SA)</span>
+        <span><span style="background:#fce8e6;padding:1px 6px;border-radius:3px;text-decoration:underline">■</span> The reference that creates the edge</span>
+      </div>
     </div>
     <div class="col">
       <div class="box red">
