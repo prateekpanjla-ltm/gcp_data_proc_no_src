@@ -8,6 +8,7 @@ Uses Pandas with chunked processing for memory efficiency.
 import gzip
 import logging
 import os
+import shutil
 import tempfile
 import time
 from typing import List, Optional
@@ -180,7 +181,7 @@ def _process_with_pandas(
         decompressed_path = tmp_path[:-3]  # remove .gz
         with gzip.open(tmp_path, 'rb') as f_in:
             with open(decompressed_path, 'wb') as f_out:
-                f_out.write(f_in.read())
+                shutil.copyfileobj(f_in, f_out)
         os.remove(tmp_path)
         tmp_path = decompressed_path
 
