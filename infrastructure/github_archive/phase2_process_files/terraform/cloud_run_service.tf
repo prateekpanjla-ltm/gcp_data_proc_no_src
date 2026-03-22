@@ -60,7 +60,7 @@ resource "google_cloud_run_v2_service" "processor" {
       resources {
         limits = {
           cpu    = "2"
-          memory = "4Gi"
+          memory = "8Gi"
         }
         # cpu_idle = true → request-based billing (CPU throttled when idle)
         # Saves ~₹1,400/month vs instance-based (cpu_idle = false)
