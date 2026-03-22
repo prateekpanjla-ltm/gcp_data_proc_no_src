@@ -29,7 +29,7 @@ variable "landing_bucket_name" {
 variable "file_size_threshold_mb" {
   description = "File size threshold for splitting (in MB)"
   type        = number
-  default     = 50
+  default     = 150
 
   validation {
     condition     = var.file_size_threshold_mb >= 50
@@ -62,7 +62,7 @@ variable "processor_cpu" {
 variable "max_instances" {
   description = "Maximum number of Cloud Run instances"
   type        = number
-  default     = 100
+  default     = 150
 
   validation {
     condition     = var.max_instances >= 1 && var.max_instances <= 1000
@@ -73,7 +73,7 @@ variable "max_instances" {
 variable "chunksize" {
   description = "Number of records per chunk for processing"
   type        = number
-  default     = 100000
+  default     = 150000
 
   validation {
     condition     = var.chunksize >= 10000 && var.chunksize <= 1000000
