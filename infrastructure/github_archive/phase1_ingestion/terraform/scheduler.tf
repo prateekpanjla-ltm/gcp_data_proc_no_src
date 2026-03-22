@@ -10,6 +10,7 @@ resource "google_cloud_scheduler_job" "github_archive_download" {
 
   schedule  = "30 * * * *" # Every hour at 30 minutes past
   time_zone = "UTC"
+  paused    = true # Created paused — resumed after all phases deploy
 
   http_target {
     http_method = "POST"

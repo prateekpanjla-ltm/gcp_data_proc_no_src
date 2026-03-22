@@ -199,6 +199,18 @@ echo ""
 echo "  Phase 4 complete."
 
 # =============================================================================
+# Activate Scheduler (all infra is now deployed)
+# =============================================================================
+echo ""
+echo "Step 5/5: Activating scheduler..."
+SCHEDULER_NAME="${ENVIRONMENT}-github-archive-download-job"
+gcloud scheduler jobs resume "${SCHEDULER_NAME}" \
+  --location="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --quiet 2>/dev/null && echo "  Scheduler resumed: ${SCHEDULER_NAME}" \
+  || echo "  WARNING: Could not resume scheduler (may already be active)"
+
+# =============================================================================
 # Summary
 # =============================================================================
 DEPLOY_END=$(date +%s)
