@@ -23,7 +23,7 @@ PROJECT_ID = os.getenv('PROJECT_ID')
 LANDING_BUCKET = os.getenv('LANDING_BUCKET')
 STAGING_BUCKET = os.getenv('STAGING_BUCKET')
 FILE_SIZE_THRESHOLD_MB = int(os.getenv('FILE_SIZE_THRESHOLD_MB', '50'))
-CHUNKSIZE = int(os.getenv('CHUNKSIZE', '100000'))
+CHUNKSIZE = int(os.getenv('CHUNKSIZE', '50000'))
 
 # Cloud Run requires 0.0.0.0 binding
 HOST = '0.0.0.0'

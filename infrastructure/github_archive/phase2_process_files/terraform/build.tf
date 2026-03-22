@@ -8,6 +8,9 @@ resource "null_resource" "build_processor_image" {
     dockerfile_hash   = filesha256("${path.module}/../../../../src/github_archive/phase2_process_files/Dockerfile.processor")
     requirements_hash = filesha256("${path.module}/../../../../src/github_archive/phase2_process_files/requirements.txt")
     cloudbuild_config = filesha256("${path.module}/../../../../config/cloudbuild-phase2.yaml")
+    main_hash         = filesha256("${path.module}/../../../../src/github_archive/phase2_process_files/main.py")
+    processor_hash    = filesha256("${path.module}/../../../../src/github_archive/phase2_process_files/processors/file_processor.py")
+    transformer_hash  = filesha256("${path.module}/../../../../src/github_archive/phase2_process_files/processors/transformer.py")
   }
 
   provisioner "local-exec" {

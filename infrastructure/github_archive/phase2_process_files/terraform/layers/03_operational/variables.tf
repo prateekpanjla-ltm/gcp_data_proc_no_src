@@ -74,7 +74,7 @@ variable "max_instances" {
 variable "chunksize" {
   description = "Number of records per chunk for processing"
   type        = number
-  default     = 150000
+  default     = 50000
 
   validation {
     condition     = var.chunksize >= 10000 && var.chunksize <= 1000000
