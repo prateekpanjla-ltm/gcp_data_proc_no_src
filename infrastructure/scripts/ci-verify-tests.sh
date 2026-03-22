@@ -132,14 +132,14 @@ echo "Test 2: Phase 1 — Download"
 echo "========================================="
 
 echo "  Triggering Cloud Run Job: ${JOB_NAME}"
+DOWNLOAD_START=$(date +%s)
 gcloud run jobs execute "${JOB_NAME}" \
   --project="${PROJECT_ID}" \
   --region="${REGION}" \
   --wait 2>&1 || true
-
-ELAPSED=0
 LANDING_FOUND=false
 FOUND_FILE=""
+ELAPSED=$(( $(date +%s) - DOWNLOAD_START ))
 while [ ${ELAPSED} -lt ${LANDING_TIMEOUT} ]; do
   # Check for the exact target file first, then any .json.gz file
   if gcloud storage ls "gs://${LANDING_BUCKET}/github-archive/raw/${TARGET_FILE}" >/dev/null 2>&1; then
@@ -155,10 +155,11 @@ while [ ${ELAPSED} -lt ${LANDING_TIMEOUT} ]; do
   fi
   echo "  Waiting for landing file... (${ELAPSED}s / ${LANDING_TIMEOUT}s)"
   sleep 15
-  ELAPSED=$((ELAPSED + 15))
+  ELAPSED=$(( $(date +%s) - DOWNLOAD_START ))
 done
 
 if [ "${LANDING_FOUND}" = "true" ]; then
+  ELAPSED=$(( $(date +%s) - DOWNLOAD_START ))
   pass "File downloaded: ${FOUND_FILE} in ${ELAPSED}s"
   # Update target for subsequent checks
   TARGET_DATE=$(echo "${FOUND_FILE}" | grep -oP '^\d{4}-\d{2}-\d{2}')
