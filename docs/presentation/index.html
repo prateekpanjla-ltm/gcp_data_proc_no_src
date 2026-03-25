@@ -1047,29 +1047,30 @@ flowchart LR
         </ul>
       </div>
       <div class="box" style="padding:12px">
-        <h4>IAM Propagation Checks</h4>
+        <h4>Uniform Bucket-Level Access</h4>
         <ul>
-          <li>Current: impersonation-based check (needs tokenCreator)</li>
-          <li>Better: Policy Troubleshooter checks exact permissions needed</li>
-          <li>Check actAs before Cloud Build, not tokenCreator</li>
+          <li>Cloud Build bucket has dual ACL + IAM evaluation (uniform access OFF)</li>
+          <li>ACL doesn't include Cloud Build SA — relies on IAM inheritance</li>
+          <li>Enable uniform access to remove ACL layer and simplify propagation</li>
         </ul>
       </div>
     </div>
     <div class="col">
       <div class="box yellow" style="padding:12px">
-        <h4>Hardcoded Values</h4>
+        <h4>Pending Fixes</h4>
         <ul>
-          <li>Project number hardcoded — use <code>data.google_project</code></li>
-          <li>Was commented out due to API propagation delay</li>
-          <li>Fix: add explicit <code>depends_on</code> for API enablement</li>
+          <li>Download script creates 0-byte files on 404 — blocks re-downloads</li>
+          <li>Duplicate event_ids from gharchive source — need dedup at load time</li>
+          <li>Verification test timing — downloads file before gharchive publishes it</li>
+          <li>Build trigger doesn't hash Python source — code changes don't trigger rebuild</li>
         </ul>
       </div>
       <div class="box red" style="padding:12px">
         <h4>Over-Provisioned Roles</h4>
         <ul>
-          <li><code>tokenCreator</code> on deployer — needed for propagation check but not for builds</li>
+          <li><code>tokenCreator</code> at project level — needed for testIamPermissions enforcement check</li>
+          <li>Better: SA-level tokenCreator or ephemeral probe SA</li>
           <li>Cloud Build SA has <code>run.admin</code> + <code>actAs</code> for unused CI/CD path</li>
-          <li>Proved via audit log experiment: only actAs checked for builds</li>
         </ul>
       </div>
     </div>
