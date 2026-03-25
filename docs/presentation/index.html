@@ -605,22 +605,29 @@ curl -H "Authorization: Bearer $TOKEN" \
       </div>
     </div>
   </div>
-  <pre class="mermaid" style="max-height:200px;overflow:hidden">
-%%{init: {'sequence': {'mirrorActors': false, 'height': 30, 'boxMargin': 5}}}%%
+
+</section>
+
+<!-- ==================== SLIDE 9 (cont): IAM Propagation Sequence ==================== -->
+<section data-focus="cloudbuild">
+  <h2>IAM Propagation: The testIamPermissions Flow</h2>
+  <p class="subtitle">How our enforcement check works in practice</p>
+  <pre class="mermaid">
+%%{init: {'sequence': {'mirrorActors': false}}}%%
 sequenceDiagram
   participant TF as Terraform
-  participant IAM as IAM
-  participant SA as CB SA
-  participant GCS as Bucket
-  participant CB as Build
-  TF->>IAM: Grant roles
-  IAM-->>TF: OK (not enforced)
-  loop 10s × 18
-    TF->>SA: Impersonate
-    SA->>GCS: testIamPermissions
-    GCS-->>TF: YES/NO
+  participant IAM as GCP IAM
+  participant SA as Cloud Build SA
+  participant GCS as GCS Bucket
+  participant CB as Cloud Build
+  TF->>IAM: Grant roles to Cloud Build SA
+  IAM-->>TF: OK (recorded, not yet enforced)
+  loop Every 10s, up to 180s
+    TF->>SA: Impersonate (tokenCreator)
+    SA->>GCS: testIamPermissions(storage.objects.get, storage.objects.create)
+    GCS-->>TF: permissions actually enforced? YES/NO
   end
-  TF->>CB: builds submit
+  TF->>CB: gcloud builds submit (enforcement confirmed)
   </pre>
 </section>
 
@@ -773,6 +780,98 @@ sequenceDiagram
   <p><span class="tag red">Key:</span> actAs = associate SA with resource (deploy time) | tokenCreator = service agent mints auth tokens (runtime)</p>
 </section>
 
+<!-- ==================== SLIDE 9e: Service Agents: The Invisible Plumbing ==================== -->
+<section data-focus="agents">
+  <h2>Service Agents: The Invisible Plumbing</h2>
+  <p class="subtitle">Service agents are <strong>Google-managed identities</strong> that handle infrastructure work behind the scenes. You don't create them — Google does. But you <strong>must</strong> grant them IAM permissions.</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box yellow">
+        <h4>Why do we need them?</h4>
+        <ul style="font-size:0.7em">
+          <li>When Cloud Scheduler calls Cloud Run, <strong>someone</strong> needs to mint the OIDC auth token</li>
+          <li>When a file lands in GCS, <strong>someone</strong> needs to publish the event to Pub/Sub for Eventarc</li>
+          <li>When Eventarc delivers an event, <strong>someone</strong> needs to authenticate the HTTP call to Cloud Run</li>
+          <li>Your code doesn't do this — <strong>service agents</strong> do</li>
+        </ul>
+      </div>
+      <div class="box red">
+        <h4>You MUST use service agents — no alternative</h4>
+        <p style="font-size:0.7em">These services <strong>only</strong> operate through their own agents for internal operations. You cannot substitute your own SA. You can only grant the agents the permissions they need.</p>
+        <ul style="font-size:0.65em">
+          <li><strong>Scheduler agent</strong> — only identity that can mint tokens for scheduled jobs</li>
+          <li><strong>Storage agent</strong> — only identity GCS uses to publish Pub/Sub events</li>
+          <li><strong>Eventarc agent</strong> — only identity that routes events from Pub/Sub to destinations</li>
+          <li><strong>Pub/Sub agent</strong> — only identity that mints tokens for push delivery to Cloud Run</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 1: Scheduled Download</strong></p>
+      <pre class="mermaid">
+flowchart LR
+  A["Scheduler\nAgent"] -->|"tokenCreator"| B["Scheduler\nSA"]
+  B -->|"OIDC token"| C["Cloud Run\nJob"]
+  style A fill:#fce8e6,stroke:#c5221f
+  style B fill:#e6f4ea,stroke:#188038
+  style C fill:#e8f0fe,stroke:#1967d2
+      </pre>
+      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 2: Event-driven Processing</strong></p>
+      <pre class="mermaid">
+flowchart LR
+  G["GCS"] --> S["Storage\nAgent"]
+  S -->|"pubsub.publisher"| P["Pub/Sub"]
+  P --> E["Eventarc\nAgent"]
+  E -->|"eventReceiver"| PS["Pub/Sub\nAgent"]
+  PS -->|"tokenCreator"| I["Invoker\nSA"]
+  I -->|"OIDC token"| CR["Cloud Run\nSvc"]
+  style S fill:#fce8e6,stroke:#c5221f
+  style E fill:#fce8e6,stroke:#c5221f
+  style PS fill:#fce8e6,stroke:#c5221f
+  style I fill:#e6f4ea,stroke:#188038
+  style CR fill:#e8f0fe,stroke:#1967d2
+      </pre>
+    </div>
+  </div>
+  <p style="font-size:0.65em; text-align:center"><span style="color:#c5221f">&#9632;</span> Service Agents (Google-managed, mandatory) &nbsp;&nbsp; <span style="color:#188038">&#9632;</span> Service Accounts (we create) &nbsp;&nbsp; <span style="color:#1967d2">&#9632;</span> Compute Resources</p>
+</section>
+
+<!-- ==================== SLIDE 9f: Service Agents NOT Auto-Created ==================== -->
+<section data-focus="agents">
+  <h2>Service Agents Are NOT Auto-Created</h2>
+  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists. We use service agents in <strong>Phase 1</strong> (Scheduler agent → Cloud Run Job), <strong>Phase 2</strong> (Storage + Eventarc + Pub/Sub agents → Cloud Run Service), and <strong>Phase 3</strong> (same agents → Cloud Function).</p>
+  <div class="columns">
+    <div class="col">
+      <pre><code class="language-hcl"># You'd expect this to work:
+resource "google_project_service" "eventarc" {
+  service = "eventarc.googleapis.com"
+}
+resource "google_project_iam_member" "..." {
+  member = "serviceAccount:
+    service-NUM@gcp-sa-eventarc..."
+  depends_on = [...eventarc]
+}
+# FAILS: SA does not exist!</code></pre>
+    </div>
+    <div class="col">
+      <pre><code class="language-hcl"># Fix: Explicitly activate agents
+resource "null_resource" "init_agents" {
+  depends_on = [google_project_service.eventarc]
+  provisioner "local-exec" {
+    command = <<-SCRIPT
+      gcloud beta services identity create \
+        --service=storage.googleapis.com
+      gcloud beta services identity create \
+        --service=eventarc.googleapis.com
+    SCRIPT
+  }
+}</code></pre>
+    </div>
+  </div>
+  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then use Terraform's <code>depends_on</code> to wait for this activation step.</p>
+  <p><span class="tag yellow">Note:</span> Terraform's <code>depends_on</code> only ensures ordering — it waits for the API to report "enabled", NOT for the service agent to actually exist. That's why the explicit activation step is needed.</p>
+</section>
+
 <!-- ==================== SLIDE 10: Eventarc Chain ==================== -->
 <section data-focus="eventarc">
   <h2>The Eventarc Chain: 5 Bindings, All Required</h2>
@@ -815,97 +914,6 @@ flowchart LR
   </div>
 </section>
 
-<!-- ==================== SLIDE 10b: Why Service Agents? ==================== -->
-<section data-focus="agents">
-  <h2>Service Agents: The Invisible Plumbing</h2>
-  <p class="subtitle">Service agents are <strong>Google-managed identities</strong> that handle infrastructure work behind the scenes. You don't create them — Google does. But you <strong>must</strong> grant them IAM permissions.</p>
-  <div class="columns">
-    <div class="col">
-      <div class="box yellow">
-        <h4>Why do we need them?</h4>
-        <ul style="font-size:0.7em">
-          <li>When Cloud Scheduler calls Cloud Run, <strong>someone</strong> needs to mint the OIDC auth token</li>
-          <li>When a file lands in GCS, <strong>someone</strong> needs to publish the event to Pub/Sub for Eventarc</li>
-          <li>When Eventarc delivers an event, <strong>someone</strong> needs to authenticate the HTTP call to Cloud Run</li>
-          <li>Your code doesn't do this — <strong>service agents</strong> do</li>
-        </ul>
-      </div>
-    </div>
-    <div class="col">
-      <div class="box red">
-        <h4>The catch with Eventarc</h4>
-        <p style="font-size:0.7em">Eventarc requires <strong>explicit activation</strong> of both the Storage and Eventarc service agents via <code>gcloud beta services identity create</code>. Without this, the agents don't exist and IAM grants fail silently.</p>
-      </div>
-    </div>
-  </div>
-  <div class="columns">
-    <div class="col">
-      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 1: Scheduled Download</strong></p>
-      <pre class="mermaid">
-flowchart LR
-  A["Scheduler\nAgent"] -->|"tokenCreator"| B["Scheduler\nSA"]
-  B -->|"OIDC token"| C["Cloud Run\nJob"]
-  style A fill:#fce8e6,stroke:#c5221f
-  style B fill:#e6f4ea,stroke:#188038
-  style C fill:#e8f0fe,stroke:#1967d2
-      </pre>
-    </div>
-    <div class="col">
-      <p style="font-size:0.7em; text-align:center; margin-bottom:0"><strong>Phase 2: Event-driven Processing</strong></p>
-      <pre class="mermaid">
-flowchart LR
-  G["GCS"] --> S["Storage\nAgent"]
-  S -->|"pubsub.publisher"| P["Pub/Sub"]
-  P --> E["Eventarc\nAgent"]
-  E -->|"eventReceiver"| PS["Pub/Sub\nAgent"]
-  PS -->|"tokenCreator"| I["Invoker\nSA"]
-  I -->|"OIDC token"| CR["Cloud Run\nSvc"]
-  style S fill:#fce8e6,stroke:#c5221f
-  style E fill:#fce8e6,stroke:#c5221f
-  style PS fill:#fce8e6,stroke:#c5221f
-  style I fill:#e6f4ea,stroke:#188038
-  style CR fill:#e8f0fe,stroke:#1967d2
-      </pre>
-    </div>
-  </div>
-  <p style="font-size:0.65em; text-align:center"><span style="color:#c5221f">&#9632;</span> Service Agents (Google-managed) &nbsp;&nbsp; <span style="color:#188038">&#9632;</span> Service Accounts (we create) &nbsp;&nbsp; <span style="color:#1967d2">&#9632;</span> Compute Resources</p>
-</section>
-
-<!-- ==================== SLIDE 10c: Service Agents NOT Auto-Created ==================== -->
-<section data-focus="agents">
-  <h2>Service Agents Are NOT Auto-Created</h2>
-  <p><span class="tag red">Surprise:</span> Enabling an API does not guarantee the service agent SA exists. We use service agents in <strong>Phase 1</strong> (Scheduler agent → Cloud Run Job), <strong>Phase 2</strong> (Storage + Eventarc + Pub/Sub agents → Cloud Run Service), and <strong>Phase 3</strong> (same agents → Cloud Function).</p>
-  <div class="columns">
-    <div class="col">
-      <pre><code class="language-hcl"># You'd expect this to work:
-resource "google_project_service" "eventarc" {
-  service = "eventarc.googleapis.com"
-}
-resource "google_project_iam_member" "..." {
-  member = "serviceAccount:
-    service-NUM@gcp-sa-eventarc..."
-  depends_on = [...eventarc]
-}
-# FAILS: SA does not exist!</code></pre>
-    </div>
-    <div class="col">
-      <pre><code class="language-hcl"># Fix: Explicitly activate agents
-resource "null_resource" "init_agents" {
-  depends_on = [google_project_service.eventarc]
-  provisioner "local-exec" {
-    command = <<-SCRIPT
-      gcloud beta services identity create \
-        --service=storage.googleapis.com
-      gcloud beta services identity create \
-        --service=eventarc.googleapis.com
-    SCRIPT
-  }
-}</code></pre>
-    </div>
-  </div>
-  <p>In Terraform, we use a <code>null_resource</code> with <code>local-exec</code> to run <code>gcloud beta services identity create</code> for each service. IAM grants then use Terraform's <code>depends_on</code> (which controls resource creation order) to wait for this activation step before attempting to grant permissions to the agent.</p>
-  <p><span class="tag yellow">Note:</span> Terraform's <code>depends_on</code> only ensures ordering — it waits for the API resource to report "enabled", NOT for the service agent to actually exist. That's why the explicit activation step is needed.</p>
-</section>
 
 <!-- ==================== SLIDE 11: Destroy & Reprovision ==================== -->
 <section data-focus="all">
