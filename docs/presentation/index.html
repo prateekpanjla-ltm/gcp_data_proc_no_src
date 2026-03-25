@@ -706,21 +706,22 @@ curl -H "Authorization: Bearer $TOKEN" \
       </div>
     </div>
   </div>
-  <pre class="mermaid">
+  <pre class="mermaid" style="max-height:200px;overflow:hidden">
+%%{init: {'sequence': {'mirrorActors': false, 'height': 30, 'boxMargin': 5}}}%%
 sequenceDiagram
   participant TF as Terraform
-  participant IAM as GCP IAM
-  participant CB_SA as Cloud Build SA
-  participant GCS as GCS Bucket
-  participant CB as Cloud Build
-  TF->>IAM: Grant roles to Cloud Build SA
-  IAM-->>TF: OK (recorded, not yet enforced)
-  loop Every 10s, up to 180s
-    TF->>CB_SA: Impersonate (tokenCreator)
-    CB_SA->>GCS: testIamPermissions(storage.objects.get, storage.objects.create)
-    GCS-->>TF: permissions actually enforced? YES/NO
+  participant IAM as IAM
+  participant SA as CB SA
+  participant GCS as Bucket
+  participant CB as Build
+  TF->>IAM: Grant roles
+  IAM-->>TF: OK (not enforced)
+  loop 10s × 18
+    TF->>SA: Impersonate
+    SA->>GCS: testIamPermissions
+    GCS-->>TF: YES/NO
   end
-  TF->>CB: gcloud builds submit (enforcement confirmed)
+  TF->>CB: builds submit
   </pre>
 </section>
 
@@ -750,13 +751,13 @@ sequenceDiagram
       </div>
     </div>
     <div class="col">
-      <pre class="mermaid">
-flowchart TD
-  D["Deployer SA"] -->|"tokenCreator\n(project level)"| CB["Cloud Build SA\n(just created)"]
-  CB -->|"testIamPermissions"| B["GCS Bucket\n_cloudbuild"]
-  B -->|"storage.objects.get?\nstorage.objects.create?"| R{"Enforced?"}
-  R -->|"YES"| GO["Proceed with\ngcloud builds submit"]
-  R -->|"NO"| WAIT["Wait 10s\nretry"]
+      <pre class="mermaid" style="max-height:250px">
+flowchart LR
+  D["Deployer SA"] -->|"tokenCreator"| CB["Cloud Build SA"]
+  CB -->|"testIamPermissions"| B["GCS Bucket"]
+  B --> R{"Enforced?"}
+  R -->|YES| GO["builds submit"]
+  R -->|NO| WAIT["retry 10s"]
   WAIT --> CB
   style D fill:#fef7e0,stroke:#b08200
   style CB fill:#e6f4ea,stroke:#188038
