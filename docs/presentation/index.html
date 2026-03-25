@@ -673,28 +673,36 @@ sequenceDiagram
   <div class="columns">
     <div class="col">
       <div class="box red">
-        <h4>Naive: sleep 60</h4>
+        <h4>Approach 1: sleep 60</h4>
         <pre><code class="language-hcl">provisioner "local-exec" {
   command = "sleep 60"
 }</code></pre>
         <p class="small">Wasteful (usually 10-20s). Unreliable (sometimes 7 min). No verification.</p>
       </div>
+      <div class="box yellow">
+        <h4>Approach 2: Policy Troubleshooter</h4>
+        <pre><code class="language-bash">gcloud policy-troubleshoot iam \
+  "//cloudresourcemanager.../projects/$P"\
+  --principal-email="$SA" \
+  --permission="storage.objects.get"</code></pre>
+        <p class="small">Checks policy documents, not actual enforcement. Said GRANTED but access was still denied — <strong>not reliable for propagation checks.</strong></p>
+      </div>
     </div>
     <div class="col">
       <div class="box green">
-        <h4>Better: Poll + Policy Troubleshooter</h4>
-        <pre><code class="language-bash">for i in $(seq 1 18); do
-  # Check 1: tokenCreator propagated?
-  # Check 2: cloudbuild.builds.create?
-  # Check 3: storage.objects.create?
-  # Check 4: storage.objects.get?
-  gcloud policy-troubleshoot iam \
-    "//cloudresourcemanager.../projects/$P"\
-    --principal-email="$SA" \
-    --permission="cloudbuild.builds.create"
-  # If all GRANTED -> proceed
-  sleep 10
-done</code></pre>
+        <h4>Approach 3: testIamPermissions (what we use)</h4>
+        <pre><code class="language-bash"># Impersonate Cloud Build SA, then test
+TOKEN=$(gcloud auth print-access-token \
+  --impersonate-service-account="$SA")
+
+# Test actual enforcement on the bucket
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://storage.googleapis.com/storage/v1/\
+  b/$BUCKET/iam/testPermissions?\
+  permissions=storage.objects.get\
+  &permissions=storage.objects.create"
+# Returns actual permissions the SA has NOW</code></pre>
+        <p class="small">Tests real enforcement — same path as actual API calls. <strong>Requires tokenCreator to impersonate the SA being tested.</strong></p>
       </div>
     </div>
   </div>
@@ -702,19 +710,66 @@ done</code></pre>
 sequenceDiagram
   participant TF as Terraform
   participant IAM as GCP IAM
-  participant PT as Policy Troubleshooter
+  participant CB_SA as Cloud Build SA
+  participant GCS as GCS Bucket
   participant CB as Cloud Build
   TF->>IAM: Grant roles to Cloud Build SA
   IAM-->>TF: OK (recorded, not yet enforced)
   loop Every 10s, up to 180s
-    TF->>PT: Check 1: tokenCreator propagated?
-    TF->>PT: Check 2: cloudbuild.builds.create?
-    TF->>PT: Check 3: storage.objects.create?
-    TF->>PT: Check 4: storage.objects.get?
-    PT-->>TF: NOT YET / GRANTED
+    TF->>CB_SA: Impersonate (tokenCreator)
+    CB_SA->>GCS: testIamPermissions(storage.objects.get, storage.objects.create)
+    GCS-->>TF: permissions actually enforced? YES/NO
   end
-  TF->>CB: gcloud builds submit (all 4 GRANTED)
+  TF->>CB: gcloud builds submit (enforcement confirmed)
   </pre>
+</section>
+
+<!-- ==================== SLIDE 9b: Why tokenCreator for enforcement checks ==================== -->
+<section data-focus="cloudbuild">
+  <h2>Why tokenCreator Is Needed for Enforcement Checks</h2>
+  <p class="subtitle">testIamPermissions checks enforcement, but you must call it <strong>as</strong> the SA being tested</p>
+  <div class="columns">
+    <div class="col">
+      <div class="box">
+        <h4>The Problem</h4>
+        <ul>
+          <li><code>testIamPermissions</code> checks what the <strong>caller</strong> can do</li>
+          <li>We need to check what the <strong>Cloud Build SA</strong> can do</li>
+          <li>So the deployer must <strong>impersonate</strong> the Cloud Build SA to call the API as that SA</li>
+          <li>Impersonation requires <code>tokenCreator</code> permission</li>
+        </ul>
+      </div>
+      <div class="box yellow">
+        <h4>tokenCreator Scope</h4>
+        <ul>
+          <li>Granted at <strong>project level</strong> — deployer can impersonate any SA in the project</li>
+          <li>Broader than ideal, but necessary: Cloud Build SA is created in the same terraform apply</li>
+          <li>Can't grant SA-level tokenCreator on a SA that doesn't exist yet</li>
+          <li><strong>Improvement:</strong> use ephemeral probe SA or Workload Identity Federation</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col">
+      <pre class="mermaid">
+flowchart TD
+  D["Deployer SA"] -->|"tokenCreator\n(project level)"| CB["Cloud Build SA\n(just created)"]
+  CB -->|"testIamPermissions"| B["GCS Bucket\n_cloudbuild"]
+  B -->|"storage.objects.get?\nstorage.objects.create?"| R{"Enforced?"}
+  R -->|"YES"| GO["Proceed with\ngcloud builds submit"]
+  R -->|"NO"| WAIT["Wait 10s\nretry"]
+  WAIT --> CB
+  style D fill:#fef7e0,stroke:#b08200
+  style CB fill:#e6f4ea,stroke:#188038
+  style B fill:#e8f0fe,stroke:#1967d2
+  style GO fill:#e6f4ea,stroke:#188038
+  style WAIT fill:#fce8e6,stroke:#c5221f
+      </pre>
+      <div class="box red">
+        <h4>What we learned</h4>
+        <p class="small">Policy Troubleshooter said GRANTED but <code>gcloud builds submit</code> still failed with <code>storage.objects.get</code> denied. Troubleshooter reads the policy document (updated immediately). Enforcement lags behind. <code>testIamPermissions</code> checks the enforcement layer — the same path real API calls use.</p>
+      </div>
+    </div>
+  </div>
 </section>
 
 <!-- ==================== SLIDE 10: Eventarc Chain ==================== -->
